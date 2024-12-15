@@ -73,3 +73,6 @@ crashlytics-build.properties
 
 # mono_crash.*.blob files
 mono_crash.*.blob
+
+# Temporary auto-generated files
+.utmp/*

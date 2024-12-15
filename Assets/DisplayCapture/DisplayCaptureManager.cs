@@ -1,6 +1,7 @@
 using System;
 using UnityEngine;
 using UnityEngine.Events;
+using Anaglyph.DisplayCapture.ObjectDetection; 
 
 namespace Anaglyph.DisplayCapture
 {
