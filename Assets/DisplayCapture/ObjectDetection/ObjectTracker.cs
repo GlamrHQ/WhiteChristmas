@@ -22,7 +22,7 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
         {
             public int trackingId;
             public string text;
-            public Vector3[] corners; // 4 points: bottom-left, top-left, top-right, bottom-right
+            public Vector3[] corners; // 4 points
             public Pose pose;
             public float confidence;
 
@@ -43,8 +43,7 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
             Vector2Int size = DisplayCaptureManager.Instance.Size;
             float aspect = size.x / (float)size.y;
 
-            // Create a perspective projection matrix based on the FOV and aspect ratio
-            displayCaptureProjection = Matrix4x4.Perspective(Fov, aspect, 0.1f, 100f); // Adjust near and far clip planes if necessary
+            displayCaptureProjection = Matrix4x4.Perspective(Fov, aspect, 1, 100f);
         }
 
         private void OnDestroy()
@@ -59,7 +58,7 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
 
             foreach (ObjectDetector.Result objectResult in objectResults)
             {
-                // Use the label with the highest confidence
+                // For simplicity, we'll only use the label with the highest confidence
                 string objectLabel = "Unknown";
                 float objectConfidence = 0;
                 if (objectResult.labels.Length > 0)
@@ -71,87 +70,55 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
                 TrackedObject trackResult = new TrackedObject(objectResult.trackingId, objectLabel, objectConfidence);
 
                 float timestampInSeconds = objectResult.timestamp * 0.000000001f;
-
-                // Get the head pose at the timestamp of the object detection result
                 OVRPlugin.PoseStatef headPoseState = OVRPlugin.GetNodePoseStateAtTime(timestampInSeconds, OVRPlugin.Node.Head);
                 OVRPose headPose = headPoseState.Pose.ToOVRPose();
                 Matrix4x4 headTransform = Matrix4x4.TRS(headPose.position, headPose.orientation, Vector3.one);
 
+                Vector3[] worldPoints = new Vector3[4];
                 ObjectDetector.BoundingBox bbox = objectResult.boundingBox;
-                Vector2Int captureSize = DisplayCaptureManager.Instance.Size;
 
-                // Convert bounding box to UV coordinates (and flip the V / Y-axis)
+                Vector2Int size = DisplayCaptureManager.Instance.Size;
+
+                // Convert bounding box to corner points
                 Vector2[] uvs = new Vector2[] {
-                    new Vector2(bbox.left / captureSize.x, bbox.bottom / captureSize.y), // Bottom-left
-                    new Vector2(bbox.left / captureSize.x, bbox.top / captureSize.y), // Top-left
-                    new Vector2(bbox.right / captureSize.x, bbox.top / captureSize.y), // Top-right
-                    new Vector2(bbox.right / captureSize.x, bbox.bottom / captureSize.y)  // Bottom-right
+                    new Vector2(bbox.left / size.x, 1f - bbox.top / size.y),
+                    new Vector2(bbox.left / size.x, 1f - bbox.bottom / size.y),
+                    new Vector2(bbox.right / size.x, 1f - bbox.bottom / size.y),
+                    new Vector2(bbox.right / size.x, 1f - bbox.top / size.y)
                 };
 
-                // Adjust UVs for aspect ratio differences between the capture and the camera's viewport
-                float captureAspect = (float)captureSize.x / captureSize.y;
-                float cameraAspect = Camera.main.aspect;
-                float aspectCorrection = cameraAspect / captureAspect;
-
-                if (aspectCorrection > 1)
-                {
-                    for (int i = 0; i < 4; i++)
-                    {
-                        uvs[i].x = (uvs[i].x - 0.5f) * aspectCorrection + 0.5f;
-                    }
-                }
-                else
-                {
-                    for (int i = 0; i < 4; i++)
-                    {
-                        uvs[i].y = (uvs[i].y - 0.5f) / aspectCorrection + 0.5f;
-                    }
-                }
-
-                // Unproject UVs to view space to get 3D points relative to the camera
-                Vector3[] viewPoints = new Vector3[4];
                 for (int i = 0; i < 4; i++)
                 {
-                    viewPoints[i] = Unproject(displayCaptureProjection, uvs[i]);
+                    Vector3 worldPos = Unproject(displayCaptureProjection, uvs[i]);
+                    worldPos.z = -worldPos.z;
+                    worldPos = headTransform.MultiplyPoint(worldPos);
+                    worldPoints[i] = worldPos;
                 }
 
-                // Sample depth and convert view points to world space using the head transform
-                if (DepthToWorld.SampleWorld(viewPoints, out trackResult.corners))
-                {
-                    for (int i = 0; i < 4; i++)
-                    {
-                        trackResult.corners[i] = headTransform.MultiplyPoint(trackResult.corners[i]);
-                    }
+                DepthToWorld.SampleWorld(worldPoints, out trackResult.corners);
 
-                    // Calculate pose (position and rotation) from the corners
-                    Vector3 up = (trackResult.corners[1] - trackResult.corners[0]).normalized;
-                    Vector3 right = (trackResult.corners[2] - trackResult.corners[1]).normalized;
-                    Vector3 normal = -Vector3.Cross(up, right).normalized; // Ensure normal points towards the camera
-                    Vector3 center = (trackResult.corners[0] + trackResult.corners[2]) / 2f;
+                var corners = trackResult.corners;
 
-                    trackResult.pose = new Pose(center, Quaternion.LookRotation(normal, up));
-                    trackedObjects.Add(trackResult);
-                }
+                Vector3 up = (corners[1] - corners[0]).normalized;
+                Vector3 right = (corners[2] - corners[1]).normalized;
+                Vector3 normal = -Vector3.Cross(up, right).normalized;
+
+                Vector3 center = (corners[2] + corners[0]) / 2f;
+
+                trackResult.pose = new Pose(center, Quaternion.LookRotation(normal, up));
+
+                trackedObjects.Add(trackResult);
             }
 
             OnTrackObjects.Invoke(trackedObjects);
         }
 
-        // Helper function to unproject a UV coordinate to a point in view space
         private static Vector3 Unproject(Matrix4x4 projection, Vector2 uv)
         {
-            // Convert UV to normalized device coordinates (NDC), ranging from -1 to 1
-            Vector2 ndc = 2f * uv - Vector2.one;
-
-            // Create a point in clip space with a nominal depth (e.g., 0.1)
-            // The depth value here is not critical for our purpose, as we'll use DepthToWorld to get the actual depth
-            Vector4 clipSpacePoint = new Vector4(ndc.x, ndc.y, 0.1f, 1f);
-
-            // Convert from clip space to view space
-            Vector4 viewSpacePoint = projection.inverse * clipSpacePoint;
-
-            // Perspective divide to get the final view space point
-            return new Vector3(viewSpacePoint.x, viewSpacePoint.y, viewSpacePoint.z) / viewSpacePoint.w;
+            Vector2 v = 2f * uv - Vector2.one;
+            var p = new Vector4(v.x, v.y, 0.1f, 1f);
+            p = projection.inverse * p;
+            return new Vector3(p.x, p.y, p.z) / p.w;
         }
     }
 }
