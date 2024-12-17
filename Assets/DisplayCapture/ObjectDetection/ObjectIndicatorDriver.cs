@@ -8,9 +8,17 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
         [SerializeField] private ObjectTracker objectTracker;
         [SerializeField] private GameObject indicatorPrefab;
 
+        // Public input for the center eye transform
+        public Transform centerEyeTransform;
+
         private List<ObjectIndicator> indicators = new(5);
 
-        private void InstantiateIndicator() => indicators.Add(Instantiate(indicatorPrefab).GetComponent<ObjectIndicator>());
+        private void InstantiateIndicator()
+        {
+            var indicator = Instantiate(indicatorPrefab).GetComponent<ObjectIndicator>();
+            indicator.centerEyeTransform = centerEyeTransform; // Pass the transform to the indicator
+            indicators.Add(indicator);
+        }
 
         private void Awake()
         {
@@ -36,7 +44,7 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
             int i = 0;
             foreach (ObjectTracker.TrackedObject result in results)
             {
-                if (i > indicators.Count)
+                if (i >= indicators.Count)
                     InstantiateIndicator();
 
                 indicators[i].gameObject.SetActive(true);
