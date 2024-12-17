@@ -18,11 +18,21 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
 
         public event Action<IEnumerable<TrackedObject>> OnTrackObjects = delegate { };
 
+        // MLKit supported labels
+        private readonly HashSet<string> supportedLabels = new HashSet<string>()
+        {
+            "Fashion good",
+            "Food",
+            "Home good",
+            "Place",
+            "Plant"
+        };
+
         public struct TrackedObject
         {
             public int trackingId;
             public string text;
-            public Vector3[] corners; // 4 points
+            public Vector3 center; // Now only storing the center
             public Pose pose;
             public float confidence;
 
@@ -30,8 +40,8 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
             {
                 this.trackingId = trackingId;
                 this.text = text;
-                corners = new Vector3[4];
-                pose = new Pose();
+                this.center = Vector3.zero;
+                this.pose = new Pose();
                 this.confidence = confidence;
             }
         }
@@ -58,13 +68,17 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
 
             foreach (ObjectDetector.Result objectResult in objectResults)
             {
-                // For simplicity, we'll only use the label with the highest confidence
+                // Filter out unknown labels
                 string objectLabel = "Unknown";
                 float objectConfidence = 0;
-                if (objectResult.labels.Length > 0)
+                if (objectResult.labels.Length > 0 && supportedLabels.Contains(objectResult.labels[0].text))
                 {
                     objectLabel = objectResult.labels[0].text;
                     objectConfidence = objectResult.labels[0].confidence;
+                }
+                else
+                {
+                    continue; // Skip this object if the label is not supported
                 }
 
                 TrackedObject trackResult = new TrackedObject(objectResult.trackingId, objectLabel, objectConfidence);
@@ -74,38 +88,28 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
                 OVRPose headPose = headPoseState.Pose.ToOVRPose();
                 Matrix4x4 headTransform = Matrix4x4.TRS(headPose.position, headPose.orientation, Vector3.one);
 
-                Vector3[] worldPoints = new Vector3[4];
                 ObjectDetector.BoundingBox bbox = objectResult.boundingBox;
-
                 Vector2Int size = DisplayCaptureManager.Instance.Size;
 
-                // Convert bounding box to corner points
-                Vector2[] uvs = new Vector2[] {
-                    new Vector2(bbox.left / size.x, 1f - bbox.top / size.y),
-                    new Vector2(bbox.left / size.x, 1f - bbox.bottom / size.y),
-                    new Vector2(bbox.right / size.x, 1f - bbox.bottom / size.y),
-                    new Vector2(bbox.right / size.x, 1f - bbox.top / size.y)
-                };
+                // Calculate the center UV of the bounding box
+                Vector2 centerUV = new Vector2(
+                    (bbox.left + bbox.right) / (2f * size.x),
+                    1f - (bbox.top + bbox.bottom) / (2f * size.y)
+                );
 
-                for (int i = 0; i < 4; i++)
-                {
-                    Vector3 worldPos = Unproject(displayCaptureProjection, uvs[i]);
-                    worldPos.z = -worldPos.z;
-                    worldPos = headTransform.MultiplyPoint(worldPos);
-                    worldPoints[i] = worldPos;
-                }
+                // Unproject the center UV to get a world position
+                Vector3 centerWorldPos = Unproject(displayCaptureProjection, centerUV);
+                centerWorldPos.z = -centerWorldPos.z;
+                centerWorldPos = headTransform.MultiplyPoint(centerWorldPos);
 
-                DepthToWorld.SampleWorld(worldPoints, out trackResult.corners);
+                // Sample the depth of the center point only
+                Vector3[] centerPointArray = new Vector3[] { centerWorldPos };
+                DepthToWorld.SampleWorld(centerPointArray, out Vector3[] depthSampleResult);
 
-                var corners = trackResult.corners;
+                trackResult.center = depthSampleResult[0];
 
-                Vector3 up = (corners[1] - corners[0]).normalized;
-                Vector3 right = (corners[2] - corners[1]).normalized;
-                Vector3 normal = -Vector3.Cross(up, right).normalized;
-
-                Vector3 center = (corners[2] + corners[0]) / 2f;
-
-                trackResult.pose = new Pose(center, Quaternion.LookRotation(normal, up));
+                // We no longer calculate a full pose with orientation, just store the center
+                trackResult.pose = new Pose(trackResult.center, Quaternion.identity);
 
                 trackedObjects.Add(trackResult);
             }

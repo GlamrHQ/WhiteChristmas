@@ -5,36 +5,24 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
 {
     public class ObjectIndicator : MonoBehaviour
     {
-        [SerializeField] private LineRenderer lineRenderer;
-        public LineRenderer LineRenderer => lineRenderer;
-
         [SerializeField] private TMP_Text textMesh;
         public TMP_Text TextMesh => textMesh;
 
-        private Vector3[] offsetPositions = new Vector3[4];
+        public Transform centerEyeTransform;
 
-        public void Set(ObjectTracker.TrackedObject result) => Set(result.trackingId, result.text, result.corners, result.confidence);
+        public void Set(ObjectTracker.TrackedObject result) => Set(result.trackingId, result.text, result.center, result.confidence);
 
-        public void Set(int trackingId, string text, Vector3[] corners, float confidence)
+        public void Set(int trackingId, string text, Vector3 center, float confidence)
         {
-            Vector3 topCenter = (corners[2] + corners[3]) / 2f;
-            transform.position = topCenter;
+            transform.position = center;
 
-            Vector3 up = (corners[1] - corners[0]).normalized;
-            Vector3 right = (corners[2] - corners[1]).normalized;
-            Vector3 normal = -Vector3.Cross(up, right).normalized;
-
-            Vector3 center = (corners[2] + corners[0]) / 2f;
-
-            for (int i = 0; i < 4; i++)
+            // Make the text face the center eye transform
+            if (centerEyeTransform != null)
             {
-                Vector3 dir = (corners[i] - center).normalized;
-                offsetPositions[i] = corners[i] + (dir * 0.1f);
+                transform.LookAt(centerEyeTransform.position);
+                transform.Rotate(0, 180, 0); // Flip the text
             }
 
-            transform.rotation = Quaternion.LookRotation(normal, up);
-
-            lineRenderer.SetPositions(offsetPositions);
             textMesh.text = $"ID: {trackingId}\n{text}\nConf: {confidence:F2}";
         }
     }
