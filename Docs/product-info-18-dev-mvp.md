@@ -1,0 +1,22 @@
+# Sub-tasks to achieve the MVP for product info experience on 18th December
+
+- [ ] Store anchors information
+- [ ] Have a debug screen and markers to show the anchor information visually
+- [ ] Measure the "jitteriness" of the anchors
+- [ ] Think of ways to solve jitteriness using something like Kalman filters if needed?
+- [ ] Try using the Spatial Anchor Core if possible?
+- [ ] Understand what does the ID from the MLKit inference mean
+- [ ] Have ways to detect motion and mark the anchors as dirty
+- [ ] Create method to capture smaller images that will be later used to be sent for the multimodal LLM
+- [ ] Integrate the images with multimodal LLM inference (start with Google)
+- [ ] Think of ways of optimizing the API calls, maybe create a grid and send them all as a single image with function calling?
+- [ ] Have a way to store these images locally and explore pushing to a DB if necessary
+- [ ] Explore if the anchor data needs a timeseries DB
+- [ ] Build the subroutine to detect if something is being held? (combination of hand gestures and anchor/hand collision)
+- [ ] Build a way to map the anchor ID with the product info
+- [ ] Build a bigger panel with product info on hand pickup
+- [ ] Disable the panels on putting it back into the shelf
+- [ ] Explore if the shoe anchors need to be rescanned each time on app start or should have a mechanism to cache it locally
+- [ ] Try to check if unknown label needs to be included inside again and if we should play with the logits instead of softmax?
+- [ ] Awesome audio effects at different points of the experience
+- [ ] Ask Gemini how this can be improved with better passthrough transitions, effects, edge coloring, etc. without being gimmicky.
