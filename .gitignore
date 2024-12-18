@@ -76,3 +76,6 @@ mono_crash.*.blob
 
 # Temporary auto-generated files
 .utmp/*
+
+# scrcpy directory
+scrcpy/

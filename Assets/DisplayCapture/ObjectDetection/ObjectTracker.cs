@@ -19,14 +19,14 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
         public event Action<IEnumerable<TrackedObject>> OnTrackObjects = delegate { };
 
         // MLKit supported labels
-        private readonly HashSet<string> supportedLabels = new HashSet<string>()
-        {
-            "Fashion good",
-            "Food",
-            "Home good",
-            "Place",
-            "Plant"
-        };
+        // private readonly HashSet<string> supportedLabels = new HashSet<string>()
+        // {
+        //     "Fashion good",
+        //     "Food",
+        //     "Home good",
+        //     "Place",
+        //     "Plant"
+        // };
 
         public struct TrackedObject
         {
@@ -71,7 +71,8 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
                 // Filter out unknown labels
                 string objectLabel = "Unknown";
                 float objectConfidence = 0;
-                if (objectResult.labels.Length > 0 && supportedLabels.Contains(objectResult.labels[0].text))
+                // if (objectResult.labels.Length > 0 && supportedLabels.Contains(objectResult.labels[0].text))
+                if (objectResult.labels.Length > 0 && (objectResult.labels[0].text != "Unknown"))
                 {
                     objectLabel = objectResult.labels[0].text;
                     objectConfidence = objectResult.labels[0].confidence;
