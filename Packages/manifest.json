@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "com.meta.xr.mrutilitykit": "71.0.0",
     "com.meta.xr.sdk.core": "71.0.0",
     "com.meta.xr.sdk.interaction": "68.0.1",
     "com.meta.xr.sdk.interaction.ovr": "71.0.0",
