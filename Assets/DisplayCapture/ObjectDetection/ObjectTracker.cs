@@ -1,6 +1,7 @@
 using Anaglyph.XRTemplate.DepthKit;
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using UnityEngine;
 
 namespace Anaglyph.DisplayCapture.ObjectDetection
@@ -62,7 +63,7 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
                 objectDetector.OnReadObjects -= OnReadObjects;
         }
 
-        private void OnReadObjects(IEnumerable<ObjectDetector.Result> objectResults)
+        private async void OnReadObjects(IEnumerable<ObjectDetector.Result> objectResults)
         {
             trackedObjects.Clear();
 
@@ -113,9 +114,21 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
                 trackResult.pose = new Pose(trackResult.center, Quaternion.identity);
 
                 trackedObjects.Add(trackResult);
+
+                // Create spatial anchor at the detected object's center
+                await CreateAnchorForTrackedObject(trackResult);
             }
 
             OnTrackObjects.Invoke(trackedObjects);
+        }
+
+        private async Task CreateAnchorForTrackedObject(TrackedObject trackedObject)
+        {
+            if (SpatialAnchorManager.Instance != null)
+            {
+                await SpatialAnchorManager.Instance.CreateAnchorAtPoint(trackedObject.center);
+            }
+            await Task.CompletedTask;
         }
 
         private static Vector3 Unproject(Matrix4x4 projection, Vector2 uv)
