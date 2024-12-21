@@ -7,21 +7,26 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
     {
         [SerializeField] private ObjectTracker objectTracker;
         [SerializeField] private GameObject indicatorPrefab;
+        [SerializeField] private bool enableDebugVisualization = true;
 
         // Public input for the center eye transform
         public Transform centerEyeTransform;
 
         private List<ObjectIndicator> indicators = new(5);
+        private bool isVisualizationEnabled;
 
         private void InstantiateIndicator()
         {
             var indicator = Instantiate(indicatorPrefab).GetComponent<ObjectIndicator>();
-            indicator.centerEyeTransform = centerEyeTransform; // Pass the transform to the indicator
+            indicator.centerEyeTransform = centerEyeTransform;
+            indicator.gameObject.SetActive(isVisualizationEnabled);
             indicators.Add(indicator);
         }
 
         private void Awake()
         {
+            isVisualizationEnabled = enableDebugVisualization;
+
             for (int i = 0; i < indicators.Capacity; i++)
                 InstantiateIndicator();
 
@@ -32,11 +37,22 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
         {
             foreach (ObjectIndicator indicator in indicators)
             {
-                Destroy(indicator.gameObject);
+                if (indicator != null && indicator.gameObject != null)
+                    Destroy(indicator.gameObject);
             }
 
             if (objectTracker != null)
                 objectTracker.OnTrackObjects -= OnTrackObjects;
+        }
+
+        public void SetDebugVisualization(bool enable)
+        {
+            isVisualizationEnabled = enable;
+            foreach (var indicator in indicators)
+            {
+                if (indicator != null && indicator.gameObject != null)
+                    indicator.gameObject.SetActive(isVisualizationEnabled);
+            }
         }
 
         private void OnTrackObjects(IEnumerable<ObjectTracker.TrackedObject> results)
@@ -47,15 +63,23 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
                 if (i >= indicators.Count)
                     InstantiateIndicator();
 
-                indicators[i].gameObject.SetActive(true);
-
-                indicators[i].Set(result);
+                var indicator = indicators[i];
+                if (indicator != null)
+                {
+                    indicator.gameObject.SetActive(isVisualizationEnabled);
+                    if (isVisualizationEnabled)
+                    {
+                        indicator.Set(result);
+                    }
+                }
                 i++;
             }
 
+            // Hide unused indicators
             while (i < indicators.Count)
             {
-                indicators[i].gameObject.SetActive(false);
+                if (indicators[i] != null)
+                    indicators[i].gameObject.SetActive(false);
                 i++;
             }
         }
