@@ -1,7 +1,7 @@
 using Anaglyph.XRTemplate.DepthKit;
 using System;
 using System.Collections.Generic;
-using System.Threading.Tasks;
+using System.Linq;
 using UnityEngine;
 
 namespace Anaglyph.DisplayCapture.ObjectDetection
@@ -9,40 +9,103 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
     public class ObjectTracker : MonoBehaviour
     {
         [SerializeField] private ObjectDetector objectDetector;
-
         [SerializeField] private float horizontalFieldOfViewDegrees = 82f;
+        [SerializeField] private int positionHistorySize = 30; // Number of positions to keep track of
+        [SerializeField] private float positionStabilityThreshold = 0.1f; // Meters
+        [SerializeField] private int minPositionsForAnchor = 15; // Minimum positions needed before creating anchor
+        [SerializeField] private float outlierThreshold = 0.5f; // Meters - distance from median to be considered outlier
+        [SerializeField] private float objectTimeoutSeconds = 5f; // Time after which to remove tracked objects
+
         public float Fov => horizontalFieldOfViewDegrees;
         private Matrix4x4 displayCaptureProjection;
 
+        private Dictionary<int, TrackedObjectHistory> trackedObjectHistories = new();
         private List<TrackedObject> trackedObjects = new();
         public IEnumerable<TrackedObject> TrackedObjects => trackedObjects;
 
         public event Action<IEnumerable<TrackedObject>> OnTrackObjects = delegate { };
 
-        // MLKit supported labels
-        // private readonly HashSet<string> supportedLabels = new HashSet<string>()
-        // {
-        //     "Fashion good",
-        //     "Food",
-        //     "Home good",
-        //     "Place",
-        //     "Plant"
-        // };
+        private class TrackedObjectHistory
+        {
+            private readonly Queue<Vector3> positions;
+            private readonly int maxPositions;
+            private readonly float outlierThreshold;
+            private readonly int minPositionsForAnchor;
+            private readonly float positionStabilityThreshold;
+
+            public string label;
+            public float confidence;
+            public bool hasAnchor;
+            public DateTime lastSeen = DateTime.Now;
+
+            public TrackedObjectHistory(string label, float confidence, int maxPositions, float outlierThreshold,
+                int minPositionsForAnchor, float positionStabilityThreshold)
+            {
+                this.label = label;
+                this.confidence = confidence;
+                this.hasAnchor = false;
+                this.maxPositions = maxPositions;
+                this.outlierThreshold = outlierThreshold;
+                this.minPositionsForAnchor = minPositionsForAnchor;
+                this.positionStabilityThreshold = positionStabilityThreshold;
+                this.positions = new Queue<Vector3>(maxPositions);
+            }
+
+            public void AddPosition(Vector3 position)
+            {
+                positions.Enqueue(position);
+                if (positions.Count > maxPositions)
+                    positions.Dequeue();
+                lastSeen = DateTime.Now;
+            }
+
+            public Vector3 GetStablePosition()
+            {
+                if (positions.Count < 3) return positions.Last();
+
+                var positionsList = positions.ToList();
+                positionsList.Sort((a, b) =>
+                    (a.x + a.y + a.z).CompareTo(b.x + b.y + b.z)); // Simple sorting for median
+
+                // Get median position
+                Vector3 median = positionsList[positionsList.Count / 2];
+
+                // Filter outliers
+                var filteredPositions = positionsList.Where(p =>
+                    Vector3.Distance(p, median) <= outlierThreshold).ToList();
+
+                if (filteredPositions.Count == 0) return median;
+
+                // Return average of non-outlier positions
+                Vector3 sum = Vector3.zero;
+                foreach (var pos in filteredPositions)
+                    sum += pos;
+                return sum / filteredPositions.Count;
+            }
+
+            public bool IsStable()
+            {
+                if (positions.Count < minPositionsForAnchor) return false;
+
+                Vector3 stablePos = GetStablePosition();
+                return positions.All(p => Vector3.Distance(p, stablePos) < positionStabilityThreshold);
+            }
+        }
 
         public struct TrackedObject
         {
             public int trackingId;
             public string text;
-            public Vector3 center; // Now only storing the center
+            public Vector3 center;
             public Pose pose;
             public float confidence;
 
-            public TrackedObject(int trackingId, string text, float confidence)
+            public TrackedObject(int trackingId, string text, Vector3 center, float confidence)
             {
                 this.trackingId = trackingId;
                 this.text = text;
-                this.center = Vector3.zero;
-                this.pose = new Pose();
+                this.center = center;
+                this.pose = new Pose(center, Quaternion.identity);
                 this.confidence = confidence;
             }
         }
@@ -55,6 +118,28 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
             float aspect = size.x / (float)size.y;
 
             displayCaptureProjection = Matrix4x4.Perspective(Fov, aspect, 1, 100f);
+
+            // Start cleanup coroutine
+            StartCoroutine(CleanupOldTrackedObjects());
+        }
+
+        private System.Collections.IEnumerator CleanupOldTrackedObjects()
+        {
+            while (true)
+            {
+                var now = DateTime.Now;
+                var keysToRemove = trackedObjectHistories
+                    .Where(kvp => (now - kvp.Value.lastSeen).TotalSeconds > objectTimeoutSeconds)
+                    .Select(kvp => kvp.Key)
+                    .ToList();
+
+                foreach (var key in keysToRemove)
+                {
+                    trackedObjectHistories.Remove(key);
+                }
+
+                yield return new WaitForSeconds(objectTimeoutSeconds);
+            }
         }
 
         private void OnDestroy()
@@ -69,66 +154,84 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
 
             foreach (ObjectDetector.Result objectResult in objectResults)
             {
-                // Filter out unknown labels
-                string objectLabel = "Unknown";
-                float objectConfidence = 0;
-                // if (objectResult.labels.Length > 0 && supportedLabels.Contains(objectResult.labels[0].text))
-                if (objectResult.labels.Length > 0 && (objectResult.labels[0].text != "Unknown"))
+                if (objectResult.labels.Length == 0 || objectResult.labels[0].text == "Unknown")
+                    continue;
+
+                string objectLabel = objectResult.labels[0].text;
+                float objectConfidence = objectResult.labels[0].confidence;
+
+                // Get world position for the object
+                Vector3 worldPosition = GetWorldPositionFromResult(objectResult);
+
+                // Update tracking history
+                if (!trackedObjectHistories.TryGetValue(objectResult.trackingId, out var history))
                 {
-                    objectLabel = objectResult.labels[0].text;
-                    objectConfidence = objectResult.labels[0].confidence;
+                    history = new TrackedObjectHistory(
+                        objectLabel,
+                        objectConfidence,
+                        positionHistorySize,
+                        outlierThreshold,
+                        minPositionsForAnchor,
+                        positionStabilityThreshold
+                    );
+                    trackedObjectHistories[objectResult.trackingId] = history;
                 }
-                else
-                {
-                    continue; // Skip this object if the label is not supported
-                }
 
-                TrackedObject trackResult = new TrackedObject(objectResult.trackingId, objectLabel, objectConfidence);
+                history.AddPosition(worldPosition);
+                Vector3 stablePosition = history.GetStablePosition();
 
-                float timestampInSeconds = objectResult.timestamp * 0.000000001f;
-                OVRPlugin.PoseStatef headPoseState = OVRPlugin.GetNodePoseStateAtTime(timestampInSeconds, OVRPlugin.Node.Head);
-                OVRPose headPose = headPoseState.Pose.ToOVRPose();
-                Matrix4x4 headTransform = Matrix4x4.TRS(headPose.position, headPose.orientation, Vector3.one);
-
-                ObjectDetector.BoundingBox bbox = objectResult.boundingBox;
-                Vector2Int size = DisplayCaptureManager.Instance.Size;
-
-                // Calculate the center UV of the bounding box
-                Vector2 centerUV = new Vector2(
-                    (bbox.left + bbox.right) / (2f * size.x),
-                    1f - (bbox.top + bbox.bottom) / (2f * size.y)
+                // Create tracked object for visualization
+                TrackedObject trackResult = new TrackedObject(
+                    objectResult.trackingId,
+                    objectLabel,
+                    stablePosition,
+                    objectConfidence
                 );
-
-                // Unproject the center UV to get a world position
-                Vector3 centerWorldPos = Unproject(displayCaptureProjection, centerUV);
-                centerWorldPos.z = -centerWorldPos.z;
-                centerWorldPos = headTransform.MultiplyPoint(centerWorldPos);
-
-                // Sample the depth of the center point only
-                Vector3[] centerPointArray = new Vector3[] { centerWorldPos };
-                DepthToWorld.SampleWorld(centerPointArray, out Vector3[] depthSampleResult);
-
-                trackResult.center = depthSampleResult[0];
-
-                // We no longer calculate a full pose with orientation, just store the center
-                trackResult.pose = new Pose(trackResult.center, Quaternion.identity);
 
                 trackedObjects.Add(trackResult);
 
-                // Create spatial anchor at the detected object's center
-                await CreateAnchorForTrackedObject(trackResult);
+                // Check if we should create an anchor
+                if (!history.hasAnchor && history.IsStable())
+                {
+                    await CreateAnchorForTrackedObject(trackResult);
+                    history.hasAnchor = true;
+                }
             }
 
             OnTrackObjects.Invoke(trackedObjects);
         }
 
-        private async Task CreateAnchorForTrackedObject(TrackedObject trackedObject)
+        private Vector3 GetWorldPositionFromResult(ObjectDetector.Result objectResult)
+        {
+            float timestampInSeconds = objectResult.timestamp * 0.000000001f;
+            OVRPlugin.PoseStatef headPoseState = OVRPlugin.GetNodePoseStateAtTime(timestampInSeconds, OVRPlugin.Node.Head);
+            OVRPose headPose = headPoseState.Pose.ToOVRPose();
+            Matrix4x4 headTransform = Matrix4x4.TRS(headPose.position, headPose.orientation, Vector3.one);
+
+            ObjectDetector.BoundingBox bbox = objectResult.boundingBox;
+            Vector2Int size = DisplayCaptureManager.Instance.Size;
+
+            Vector2 centerUV = new Vector2(
+                (bbox.left + bbox.right) / (2f * size.x),
+                1f - (bbox.top + bbox.bottom) / (2f * size.y)
+            );
+
+            Vector3 centerWorldPos = Unproject(displayCaptureProjection, centerUV);
+            centerWorldPos.z = -centerWorldPos.z;
+            centerWorldPos = headTransform.MultiplyPoint(centerWorldPos);
+
+            Vector3[] centerPointArray = new Vector3[] { centerWorldPos };
+            DepthToWorld.SampleWorld(centerPointArray, out Vector3[] depthSampleResult);
+
+            return depthSampleResult[0];
+        }
+
+        private async System.Threading.Tasks.Task CreateAnchorForTrackedObject(TrackedObject trackedObject)
         {
             if (SpatialAnchorManager.Instance != null)
             {
                 await SpatialAnchorManager.Instance.CreateAnchorAtPoint(trackedObject.center);
             }
-            await Task.CompletedTask;
         }
 
         private static Vector3 Unproject(Matrix4x4 projection, Vector2 uv)
