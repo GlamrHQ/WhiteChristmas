@@ -23,7 +23,7 @@ BUCKET_NAME = os.getenv("BUCKET_NAME", "object-detection-images")
 
 # Initialize Vertex AI
 PROJECT_ID = os.getenv("PROJECT_ID")
-LOCATION = os.getenv("LOCATION", "us-central1")
+LOCATION = os.getenv("LOCATION", "asia-south1")
 vertexai.init(project=PROJECT_ID, location=LOCATION)
 
 
