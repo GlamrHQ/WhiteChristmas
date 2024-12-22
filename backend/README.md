@@ -35,7 +35,7 @@ gcloud services enable \
 
 ```bash
 # Create a bucket for storing images
-gcloud storage buckets create gs://object-detection-images --location=us-central1
+gcloud storage buckets create gs://object-detection-images --location=asia-south1
 ```
 
 ### 3. Local Development Setup
@@ -75,7 +75,7 @@ gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/object-detection-api
 gcloud run deploy object-detection-api \
     --image gcr.io/YOUR_PROJECT_ID/object-detection-api \
     --platform managed \
-    --region us-central1 \
+    --region asia-south1 \
     --allow-unauthenticated \
     --set-env-vars="PROJECT_ID=YOUR_PROJECT_ID,BUCKET_NAME=object-detection-images"
 ```
@@ -85,7 +85,7 @@ gcloud run deploy object-detection-api \
 ```bash
 gcloud run services describe object-detection-api \
     --platform managed \
-    --region us-central1 \
+    --region asia-south1 \
     --format 'value(status.url)'
 ```
 
