@@ -114,3 +114,9 @@ venv/
 .vscode/
 *.swp
 *.swo
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
