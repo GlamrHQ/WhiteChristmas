@@ -49,9 +49,9 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
 # Set environment variables
-export PROJECT_ID=your-project-id
+export PROJECT_ID=joi-reality
 export BUCKET_NAME=object-detection-images
-export GOOGLE_APPLICATION_CREDENTIALS=path/to/your/service-account-key.json
+export GOOGLE_APPLICATION_CREDENTIALS=../../secrets/GCP/service-account-key.json
 ```
 
 ### 4. Local Testing
