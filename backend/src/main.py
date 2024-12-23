@@ -10,6 +10,7 @@ import uuid
 import os
 from typing import Dict
 import json
+import magic  # Import the magic library for MIME type detection
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -26,7 +27,6 @@ PROJECT_ID = os.getenv("PROJECT_ID")
 LOCATION = os.getenv("LOCATION", "asia-south1")
 vertexai.init(project=PROJECT_ID, location=LOCATION)
 
-
 def get_gemini_response(image_path: str) -> Dict:
     """Get Gemini's analysis of the image."""
     start_time = time.time()
@@ -39,8 +39,11 @@ def get_gemini_response(image_path: str) -> Dict:
         blob = bucket.blob(image_path)
         image_content = blob.download_as_bytes()
 
+        # Detect MIME type dynamically
+        mime_type = magic.from_buffer(image_content, mime=True)  # Get the MIME type
+
         # Prepare the image part
-        image_part = Part.from_data(data=image_content, mime_type="image/jpeg")
+        image_part = Part.from_data(data=image_content, mime_type=mime_type)
 
         # System prompt with function calling
         prompt = """You are an expert computer vision system analyzing images.
@@ -54,7 +57,8 @@ def get_gemini_response(image_path: str) -> Dict:
         - Brand identification if applicable
         
         Format your response using the provided function structure.
-        Be precise and confident in your observations."""
+        Be precise and confident in your observations.
+        Return the response in a JSON format, without any additional text or explanation."""
 
         # Define response structure
         response_format = {
@@ -114,7 +118,7 @@ def get_gemini_response(image_path: str) -> Dict:
         try:
             result = json.loads(response.text)
         except json.JSONDecodeError:
-            # If response isn't valid JSON, create a structured response
+            logger.warning("Gemini response was not valid JSON.")
             result = {
                 "main_object": "unknown",
                 "confidence": 0.0,
@@ -144,7 +148,6 @@ def get_gemini_response(image_path: str) -> Dict:
         logger.error(f"Error in Gemini processing: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/analyze")
 async def analyze_image(file: UploadFile):
     """
@@ -155,7 +158,9 @@ async def analyze_image(file: UploadFile):
     try:
         # Generate unique filename
         file_id = str(uuid.uuid4())
-        blob_path = f"uploads/{file_id}.jpg"
+        # Determine file extension from content type
+        file_extension = os.path.splitext(file.filename)[1] or ".jpg"
+        blob_path = f"uploads/{file_id}{file_extension}"
 
         # Upload timing
         upload_start = time.time()
@@ -194,7 +199,6 @@ async def analyze_image(file: UploadFile):
     except Exception as e:
         logger.error(f"Error processing image: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/health")
 async def health_check():

@@ -22,7 +22,7 @@ brew install google-cloud-sdk
 gcloud auth login
 
 # Set your project
-gcloud config set project YOUR_PROJECT_ID
+gcloud config set project $PROJECT_ID
 
 # Enable required APIs
 gcloud services enable \
@@ -35,7 +35,7 @@ gcloud services enable \
 
 ```bash
 # Create a bucket for storing images
-gcloud storage buckets create gs://object-detection-images --location=asia-south1
+gcloud storage buckets create gs://$BUCKET_NAME --location=asia-south1
 ```
 
 ### 3. Local Development Setup
@@ -58,7 +58,7 @@ export GOOGLE_APPLICATION_CREDENTIALS=../../secrets/GCP/service-account-key.json
 
 ```bash
 # Run the FastAPI application locally
-uvicorn main:app --reload --port 8080
+uvicorn main:app --reload --port 8080 --host 0.0.0.0
 ```
 
 Visit http://localhost:8080/docs to see the Swagger UI and test the API.
@@ -69,24 +69,25 @@ Visit http://localhost:8080/docs to see the Swagger UI and test the API.
 
 ```bash
 # Build and push the container
-gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/object-detection-api
+gcloud builds submit --tag gcr.io/$PROJECT_ID/object-detection-api
 
 # Deploy to Cloud Run
 gcloud run deploy object-detection-api \
-    --image gcr.io/YOUR_PROJECT_ID/object-detection-api \
+    --image gcr.io/$PROJECT_ID/object-detection-api \
     --platform managed \
     --region asia-south1 \
     --allow-unauthenticated \
-    --set-env-vars="PROJECT_ID=YOUR_PROJECT_ID,BUCKET_NAME=object-detection-images"
+    --set-env-vars="PROJECT_ID=$PROJECT_ID,BUCKET_NAME=$BUCKET_NAME"
 ```
 
 ### 2. Get the Service URL
 
 ```bash
-gcloud run services describe object-detection-api \
+# Get the service URL and set it as an environment variable
+export SERVICE_URL=$(gcloud run services describe object-detection-api \
     --platform managed \
     --region asia-south1 \
-    --format 'value(status.url)'
+    --format 'value(status.url)' | sed 's/https:\/\///')
 ```
 
 ## Testing the Deployed API
@@ -95,12 +96,12 @@ gcloud run services describe object-detection-api \
 
 ```bash
 # Test health endpoint
-curl https://YOUR-CLOUD-RUN-URL/health
+curl https://$SERVICE_URL/health
 
 # Test image analysis (replace path/to/image.jpg with your image path)
 curl -X POST \
     -F "file=@path/to/image.jpg" \
-    https://YOUR-CLOUD-RUN-URL/analyze
+    https://$SERVICE_URL/analyze
 ```
 
 ### Using Python
@@ -109,7 +110,7 @@ curl -X POST \
 import requests
 
 # Replace with your deployed service URL
-url = "https://YOUR-CLOUD-RUN-URL/analyze"
+url = f"https://{SERVICE_URL}/analyze"
 
 # Replace with your image path
 image_path = "path/to/image.jpg"
