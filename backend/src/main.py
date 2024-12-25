@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, HTTPException
+from fastapi import FastAPI, UploadFile, HTTPException, Form
 from fastapi.responses import JSONResponse
 from google.cloud import storage
 from google import genai
@@ -29,10 +29,42 @@ LOCATION = os.getenv("LOCATION", "asia-south1")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
 
 
-def get_gemini_response(image_content: bytes, mime_type: str) -> Dict:
+def process_llm_response(response_text: str) -> str:
+    """
+    Process and clean the LLM response text by removing markdown formatting and extracting JSON content.
+
+    Args:
+        response_text: Raw response text from the LLM
+
+    Returns:
+        Cleaned JSON string ready for parsing
+    """
+    # Remove markdown code block syntax if present
+    if response_text.startswith("```") and response_text.endswith("```"):
+        # Remove the first line (```json) and last line (```)
+        response_text = "\n".join(response_text.split("\n")[1:-1])
+
+    # If the response is in the text field, extract it
+    if "text='" in response_text and response_text.endswith("'"):
+        response_text = response_text.split("text='")[-1][:-1]
+        # Remove markdown code block syntax again if present
+        if response_text.startswith("```") and response_text.endswith("```"):
+            response_text = "\n".join(response_text.split("\n")[1:-1])
+
+    return response_text
+
+
+def get_gemini_response(
+    image_content: bytes, mime_type: str, enable_google_search: bool = True
+) -> Dict:
     """
     Get Gemini 2.0 Flash's analysis of the image using google-genai.
     The image is passed directly as bytes to avoid re-downloading from GCS.
+
+    Args:
+        image_content: Raw image bytes
+        mime_type: MIME type of the image
+        enable_google_search: Whether to enable Google Search tool (default: True)
     """
     start_time = time.time()
 
@@ -79,10 +111,14 @@ def get_gemini_response(image_content: bytes, mime_type: str) -> Dict:
         contents = [types.Content(role="user", parts=[image_part, text_part])]
 
         # Configure tools and safety settings
-        tools = [types.Tool(google_search=types.GoogleSearch())]
+        tools = (
+            [types.Tool(google_search=types.GoogleSearch())]
+            if enable_google_search
+            else []
+        )
 
         generate_content_config = types.GenerateContentConfig(
-            temperature=0.2,
+            temperature=0,
             top_p=0.95,
             max_output_tokens=8192,
             response_modalities=["TEXT"],
@@ -111,13 +147,24 @@ def get_gemini_response(image_content: bytes, mime_type: str) -> Dict:
             config=generate_content_config,
         ):
             if chunk.candidates and chunk.candidates[0].content.parts:
-                response_text += str(chunk.candidates[0].content.parts[0])
+                response_text += chunk.candidates[0].content.parts[0].text
+            elif chunk.candidates and chunk.candidates[0].content.parts:
+                response_text += chunk.candidates[0].content.parts[0].text
+            elif chunk.candidates and chunk.candidates[0].content.parts:
+                response_text += chunk.candidates[0].content.parts[0].text
+
+        # Log the response text
+        logger.info(f"Gemini response text: {response_text}")
+
+        # Process and clean the response text
+        cleaned_response = process_llm_response(response_text)
 
         # Parse JSON response
         try:
-            result = json.loads(response_text)
+            result = json.loads(cleaned_response)
         except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse Gemini response as JSON: {e}")
+            logger.warning(f"Response causing error: {cleaned_response}")
             result = {
                 "main_object": "unknown",
                 "confidence": 0.0,
@@ -149,9 +196,18 @@ def get_gemini_response(image_content: bytes, mime_type: str) -> Dict:
 
 
 @app.post("/analyze")
-async def analyze_image(file: UploadFile):
+async def analyze_image(
+    file: UploadFile,
+    enable_google_search: bool = Form(
+        default=True, description="Enable Google Search tool for enhanced analysis"
+    ),
+):
     """
     Endpoint to analyze an image using Gemini 2.0 Flash.
+
+    Args:
+        file: The image file to analyze
+        enable_google_search: Whether to enable Google Search tool for enhanced analysis (default: True)
     """
     start_time = time.time()
 
@@ -186,7 +242,7 @@ async def analyze_image(file: UploadFile):
 
         # Get Gemini analysis (passing image content directly)
         analysis_start = time.time()
-        analysis_result = get_gemini_response(content, mime_type)
+        analysis_result = get_gemini_response(content, mime_type, enable_google_search)
         analysis_time = time.time() - analysis_start
 
         total_time = time.time() - start_time
@@ -201,6 +257,7 @@ async def analyze_image(file: UploadFile):
                 "upload_time": upload_time,
                 "analysis_time": analysis_time,
                 "total_processing_time": total_time,
+                "google_search_enabled": enable_google_search,
             },
         }
 

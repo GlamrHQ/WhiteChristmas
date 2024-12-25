@@ -79,7 +79,7 @@ gcloud run deploy object-detection-api \
     --region asia-south1 \
     --allow-unauthenticated \
     --service-account=$SERVICE_ACCOUNT_EMAIL \
-    --set-env-vars="PROJECT_ID=$PROJECT_ID,BUCKET_NAME=$BUCKET_NAME"
+    --set-env-vars="PROJECT_ID=$PROJECT_ID,BUCKET_NAME=$BUCKET_NAME,LOCATION=us-central1"
 
 # Note: Make sure your service account has the following roles:
 # - roles/aiplatform.user
@@ -139,6 +139,18 @@ curl https://$SERVICE_URL/health
 curl -X POST \
     -F "file=@path/to/image.jpg" \
     https://$SERVICE_URL/analyze
+
+# Test image analysis with Google Search enabled (default)
+curl -X POST \
+    -F "file=@path/to/image.jpg" \
+    -F "enable_google_search=true" \
+    https://$SERVICE_URL/analyze
+
+# Test image analysis with Google Search disabled
+curl -X POST \
+    -F "file=@path/to/image.jpg" \
+    -F "enable_google_search=false" \
+    https://$SERVICE_URL/analyze
 ```
 
 ### Using Python
@@ -152,9 +164,19 @@ url = f"https://{SERVICE_URL}/analyze"
 # Replace with your image path
 image_path = "path/to/image.jpg"
 
+# With Google Search enabled (default)
 with open(image_path, "rb") as image_file:
     files = {"file": ("image.jpg", image_file, "image/jpeg")}
-    response = requests.post(url, files=files)
+    data = {"enable_google_search": "true"}
+    response = requests.post(url, files=files, data=data)
+
+print(response.json())
+
+# With Google Search disabled
+with open(image_path, "rb") as image_file:
+    files = {"file": ("image.jpg", image_file, "image/jpeg")}
+    data = {"enable_google_search": "false"}
+    response = requests.post(url, files=files, data=data)
 
 print(response.json())
 ```
@@ -203,7 +225,8 @@ gcloud logging tail "resource.type=cloud_run_revision AND resource.labels.servic
         "storage_path": "string",
         "upload_time": 0.5,
         "analysis_time": 0.7,
-        "total_processing_time": 1.2
+        "total_processing_time": 1.2,
+        "google_search_enabled": true
     }
 }
 ```
