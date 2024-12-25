@@ -161,10 +161,10 @@ def get_gemini_response(
 
         # Parse JSON response
         try:
-            result = json.loads(cleaned_response)
+            result = json.loads(response_text)
         except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse Gemini response as JSON: {e}")
-            logger.warning(f"Response causing error: {cleaned_response}")
+            logger.warning(f"Response causing error: {response_text}")
             result = {
                 "main_object": "unknown",
                 "confidence": 0.0,

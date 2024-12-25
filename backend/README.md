@@ -121,13 +121,17 @@ You can also manage deployments in the GCP Console:
 
 ```bash
 # Get the service URL and set it as an environment variable
-export SERVICE_URL=$(gcloud run services describe object-detection-api \
-    --platform managed \
-    --region asia-south1 \
-    --format 'value(status.url)' | sed 's/https:\/\///')
+    export SERVICE_URL=$(gcloud run services describe object-detection-api \
+        --platform managed \
+        --region asia-south1 \
+        --format 'value(status.url)' | sed 's/https:\/\///')
 ```
 
 ## Testing the Deployed API
+
+### Using OpenAPI Docs
+
+Visit https://$SERVICE_URL/docs to see the OpenAPI documentation and test the API.
 
 ### Using cURL
 
@@ -151,6 +155,7 @@ curl -X POST \
     -F "file=@path/to/image.jpg" \
     -F "enable_google_search=false" \
     https://$SERVICE_URL/analyze
+
 ```
 
 ### Using Python
