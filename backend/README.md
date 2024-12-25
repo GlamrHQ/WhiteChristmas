@@ -1,6 +1,6 @@
 # Object Detection Backend Service
 
-This service provides an API endpoint for analyzing images using Google Cloud Platform's Gemini Vision API. The service is built with FastAPI and deployed on Google Cloud Run.
+This service provides an API endpoint for analyzing images using Google Cloud Platform's Vertex AI Vision API. The service is built with FastAPI and deployed on Google Cloud Run.
 
 ## Prerequisites
 
@@ -28,7 +28,8 @@ gcloud config set project $PROJECT_ID
 gcloud services enable \
     run.googleapis.com \
     aiplatform.googleapis.com \
-    storage.googleapis.com
+    storage.googleapis.com \
+    artifactregistry.googleapis.com
 ```
 
 ### 2. Create Cloud Storage Bucket
@@ -68,7 +69,7 @@ Visit http://localhost:8080/docs to see the Swagger UI and test the API.
 ### 1. Build and Deploy
 
 ```bash
-# Build and push the container
+# Build and push the container using Cloud Build
 gcloud builds submit --tag gcr.io/$PROJECT_ID/object-detection-api
 
 # Deploy to Cloud Run
@@ -77,10 +78,46 @@ gcloud run deploy object-detection-api \
     --platform managed \
     --region asia-south1 \
     --allow-unauthenticated \
+    --service-account=$SERVICE_ACCOUNT_EMAIL \
     --set-env-vars="PROJECT_ID=$PROJECT_ID,BUCKET_NAME=$BUCKET_NAME"
+
+# Note: Make sure your service account has the following roles:
+# - roles/aiplatform.user
+# - roles/storage.objectViewer
+# - roles/storage.objectCreator
 ```
 
-### 2. Get the Service URL
+### 2. Managing Deployments
+
+```bash
+# List container images and tags
+gcloud container images list-tags gcr.io/$PROJECT_ID/object-detection-api --format='get(tags)'
+
+# List Cloud Run revisions
+gcloud run revisions list --service object-detection-api --region asia-south1
+
+# View revision traffic allocation
+gcloud run services describe object-detection-api --region asia-south1
+
+# Rollback to previous revision if needed (replace REVISION_NAME)
+gcloud run services update-traffic object-detection-api \
+    --region asia-south1 \
+    --to-revisions=REVISION_NAME=100
+
+# Clean up old container images (keeps the latest one)
+gcloud container images list-tags gcr.io/$PROJECT_ID/object-detection-api \
+    --format="get(digest)" \
+    --filter="NOT tags:latest" | \
+    while read digest; do \
+        gcloud container images delete -q --force-delete-tags "gcr.io/$PROJECT_ID/object-detection-api@$digest"; \
+    done
+```
+
+You can also manage deployments in the GCP Console:
+1. Container Registry: https://console.cloud.google.com/gcr/images
+2. Cloud Run Revisions: https://console.cloud.google.com/run/detail/asia-south1/object-detection-api/revisions
+
+### 3. Get the Service URL
 
 ```bash
 # Get the service URL and set it as an environment variable
@@ -159,7 +196,7 @@ gcloud logging tail "resource.type=cloud_run_revision AND resource.labels.servic
         "brand": "string"
     },
     "metadata": {
-        "model": "gemini-pro-vision",
+        "model": "gemini-pro-vision-001",
         "processing_time": 1.23,
         "timestamp": 1234567890.123,
         "file_id": "uuid",

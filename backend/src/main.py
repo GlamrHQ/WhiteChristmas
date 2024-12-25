@@ -1,16 +1,17 @@
 from fastapi import FastAPI, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
 from google.cloud import storage
-from google.cloud import aiplatform
-import vertexai
-from vertexai.generative_models import GenerativeModel, Part
+from google import genai
+from google.genai import types
 import time
 import logging
 import uuid
 import os
-from typing import Dict
+from typing import Dict, BinaryIO
 import json
-import magic  # Import the magic library for MIME type detection
+import magic
+from io import BytesIO
+import base64
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -22,31 +23,29 @@ app = FastAPI(title="Object Detection API")
 storage_client = storage.Client()
 BUCKET_NAME = os.getenv("BUCKET_NAME", "object-detection-images")
 
-# Initialize Vertex AI
+# Initialize Vertex AI client
 PROJECT_ID = os.getenv("PROJECT_ID")
 LOCATION = os.getenv("LOCATION", "asia-south1")
-vertexai.init(project=PROJECT_ID, location=LOCATION)
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
 
-def get_gemini_response(image_path: str) -> Dict:
-    """Get Gemini's analysis of the image."""
+
+def get_gemini_response(image_content: bytes, mime_type: str) -> Dict:
+    """
+    Get Gemini 2.0 Flash's analysis of the image using google-genai.
+    The image is passed directly as bytes to avoid re-downloading from GCS.
+    """
     start_time = time.time()
 
     try:
-        model = GenerativeModel("gemini-pro-vision")
+        # Initialize Gemini client
+        client = genai.Client(vertexai=True, project=PROJECT_ID, location=LOCATION)
 
-        # Load image from GCS
-        bucket = storage_client.bucket(BUCKET_NAME)
-        blob = bucket.blob(image_path)
-        image_content = blob.download_as_bytes()
+        # Convert image to base64 and create image part
+        image_part = types.Part.from_bytes(data=image_content, mime_type=mime_type)
 
-        # Detect MIME type dynamically
-        mime_type = magic.from_buffer(image_content, mime=True)  # Get the MIME type
-
-        # Prepare the image part
-        image_part = Part.from_data(data=image_content, mime_type=mime_type)
-
-        # System prompt with function calling
-        prompt = """You are an expert computer vision system analyzing images.
+        # Create text prompt part
+        text_part = types.Part.from_text(
+            """You are an expert computer vision system analyzing images.
         Your task is to provide detailed information about objects in the image.
         Focus on:
         - Main object identification
@@ -56,69 +55,69 @@ def get_gemini_response(image_path: str) -> Dict:
         - Any text visible
         - Brand identification if applicable
         
-        Format your response using the provided function structure.
-        Be precise and confident in your observations.
-        Return the response in a JSON format, without any additional text or explanation."""
-
-        # Define response structure
-        response_format = {
-            "name": "analyze_image",
-            "description": "Analyze the contents of an image",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "main_object": {
-                        "type": "string",
-                        "description": "Primary object identified",
-                    },
-                    "confidence": {
-                        "type": "number",
-                        "description": "Confidence score 0-1",
-                    },
-                    "attributes": {
-                        "type": "object",
-                        "properties": {
-                            "color": {"type": "string"},
-                            "size": {"type": "string"},
-                            "condition": {"type": "string"},
-                            "distinguishing_features": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                            },
-                        },
-                    },
-                    "context": {
-                        "type": "string",
-                        "description": "Environmental context",
-                    },
-                    "visible_text": {
-                        "type": "string",
-                        "description": "Any visible text",
-                    },
-                    "brand": {
-                        "type": "string",
-                        "description": "Identified brand if any",
-                    },
-                },
-                "required": ["main_object", "confidence", "attributes", "context"],
+        Format your response as a JSON object with the following structure:
+        {
+            "main_object": "string",
+            "confidence": number,
+            "attributes": {
+                "color": "string",
+                "size": "string",
+                "condition": "string",
+                "distinguishing_features": ["string"]
             },
+            "context": "string",
+            "visible_text": "string",
+            "brand": "string"
         }
-
-        # Generate response
-        response = model.generate_content(
-            [
-                prompt,
-                image_part,
-                f"Analyze this image and respond with a JSON object matching this schema: {json.dumps(response_format)}",
-            ],
-            generation_config={"temperature": 0.2, "top_p": 0.8, "top_k": 40},
+        
+        Be precise and confident in your observations.
+        Return only the JSON response without any additional text."""
         )
 
-        # Parse the response to ensure it's valid JSON
+        # Set up model configuration
+        model = GEMINI_MODEL
+        contents = [types.Content(role="user", parts=[image_part, text_part])]
+
+        # Configure tools and safety settings
+        tools = [types.Tool(google_search=types.GoogleSearch())]
+
+        generate_content_config = types.GenerateContentConfig(
+            temperature=0.2,
+            top_p=0.95,
+            max_output_tokens=8192,
+            response_modalities=["TEXT"],
+            safety_settings=[
+                types.SafetySetting(
+                    category="HARM_CATEGORY_HATE_SPEECH", threshold="OFF"
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="OFF"
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="OFF"
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_HARASSMENT", threshold="OFF"
+                ),
+            ],
+            tools=tools,
+        )
+
+        # Generate response
+        response_text = ""
+        for chunk in client.models.generate_content_stream(
+            model=model,
+            contents=contents,
+            config=generate_content_config,
+        ):
+            if chunk.candidates and chunk.candidates[0].content.parts:
+                response_text += str(chunk.candidates[0].content.parts[0])
+
+        # Parse JSON response
         try:
-            result = json.loads(response.text)
-        except json.JSONDecodeError:
-            logger.warning("Gemini response was not valid JSON.")
+            result = json.loads(response_text)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse Gemini response as JSON: {e}")
             result = {
                 "main_object": "unknown",
                 "confidence": 0.0,
@@ -138,7 +137,7 @@ def get_gemini_response(image_path: str) -> Dict:
         return {
             "analysis": result,
             "metadata": {
-                "model": "gemini-pro-vision",
+                "model": model,
                 "processing_time": processing_time,
                 "timestamp": time.time(),
             },
@@ -148,18 +147,31 @@ def get_gemini_response(image_path: str) -> Dict:
         logger.error(f"Error in Gemini processing: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/analyze")
 async def analyze_image(file: UploadFile):
     """
-    Endpoint to analyze an image using Gemini Vision.
+    Endpoint to analyze an image using Gemini 2.0 Flash.
     """
     start_time = time.time()
 
     try:
         # Generate unique filename
         file_id = str(uuid.uuid4())
-        # Determine file extension from content type
-        file_extension = os.path.splitext(file.filename)[1] or ".jpg"
+
+        # Read file content into memory
+        content = await file.read()
+
+        # Determine MIME type
+        mime_type = file.content_type
+        if not mime_type:
+            mime_type = magic.from_buffer(content, mime=True)
+
+        # Determine file extension from content type or filename
+        if file.content_type:
+            file_extension = "." + file.content_type.split("/")[1]
+        else:
+            file_extension = os.path.splitext(file.filename)[1] or ".jpg"
         blob_path = f"uploads/{file_id}{file_extension}"
 
         # Upload timing
@@ -168,14 +180,13 @@ async def analyze_image(file: UploadFile):
         # Upload to GCS
         bucket = storage_client.bucket(BUCKET_NAME)
         blob = bucket.blob(blob_path)
-        content = await file.read()
-        blob.upload_from_string(content, content_type=file.content_type)
+        blob.upload_from_string(content, content_type=mime_type)
 
         upload_time = time.time() - upload_start
 
-        # Get Gemini analysis
+        # Get Gemini analysis (passing image content directly)
         analysis_start = time.time()
-        analysis_result = get_gemini_response(blob_path)
+        analysis_result = get_gemini_response(content, mime_type)
         analysis_time = time.time() - analysis_start
 
         total_time = time.time() - start_time
@@ -199,6 +210,7 @@ async def analyze_image(file: UploadFile):
     except Exception as e:
         logger.error(f"Error processing image: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/health")
 async def health_check():
