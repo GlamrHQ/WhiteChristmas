@@ -137,6 +137,7 @@ def get_gemini_response(
                 ),
             ],
             tools=tools,
+            response_mime_type="application/json",
         )
 
         # Generate response
@@ -156,8 +157,7 @@ def get_gemini_response(
         # Log the response text
         logger.info(f"Gemini response text: {response_text}")
 
-        # Process and clean the response text
-        cleaned_response = process_llm_response(response_text)
+        # cleaned_response = process_llm_response(response_text)
 
         # Parse JSON response
         try:
