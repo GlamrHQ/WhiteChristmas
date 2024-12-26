@@ -1,17 +1,15 @@
+import time
+import logging
+import uuid
+import os
+from typing import Dict
+import json
 from fastapi import FastAPI, UploadFile, HTTPException, Form
 from fastapi.responses import JSONResponse
 from google.cloud import storage
 from google import genai
 from google.genai import types
-import time
-import logging
-import uuid
-import os
-from typing import Dict, BinaryIO
-import json
 import magic
-from io import BytesIO
-import base64
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -155,7 +153,7 @@ def get_gemini_response(
                 response_text += chunk.candidates[0].content.parts[0].text
 
         # Log the response text
-        logger.info(f"Gemini response text: {response_text}")
+        logger.info("Gemini response text: %s", response_text)
 
         # cleaned_response = process_llm_response(response_text)
 
@@ -163,8 +161,8 @@ def get_gemini_response(
         try:
             result = json.loads(response_text)
         except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse Gemini response as JSON: {e}")
-            logger.warning(f"Response causing error: {response_text}")
+            logger.warning("Failed to parse Gemini response as JSON: %s", e)
+            logger.warning("Response causing error: %s", response_text)
             result = {
                 "main_object": "unknown",
                 "confidence": 0.0,
@@ -191,8 +189,8 @@ def get_gemini_response(
         }
 
     except Exception as e:
-        logger.error(f"Error in Gemini processing: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Error in Gemini processing: %s", str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/analyze")
@@ -261,12 +259,12 @@ async def analyze_image(
             },
         }
 
-        logger.info(f"Successfully processed image {file_id}")
+        logger.info("Successfully processed image %s", file_id)
         return JSONResponse(content=response)
 
     except Exception as e:
-        logger.error(f"Error processing image: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Error processing image: %s", str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/health")

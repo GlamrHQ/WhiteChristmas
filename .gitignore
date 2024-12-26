@@ -107,7 +107,8 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-venv/
+**/venv/
+**/.venv/
 
 # IDE
 .idea/
