@@ -56,5 +56,6 @@
         "temp/": true,
         "Temp/": true
     },
-    "dotnet.defaultSolution": "ObjectDetection.sln"
+    "dotnet.defaultSolution": "ObjectDetection.sln",
+    "python.analysis.typeCheckingMode": "off"
 }
