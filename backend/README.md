@@ -206,6 +206,8 @@ gcloud logging tail "resource.type=cloud_run_revision AND resource.labels.servic
 
 ## API Response Format
 
+### Single Image Analysis (/analyze)
+
 ```json
 {
     "status": "success",
@@ -223,7 +225,7 @@ gcloud logging tail "resource.type=cloud_run_revision AND resource.labels.servic
         "brand": "string"
     },
     "metadata": {
-        "model": "gemini-pro-vision-001",
+        "model": "gemini-2.0-flash-exp",
         "processing_time": 1.23,
         "timestamp": 1234567890.123,
         "file_id": "uuid",
@@ -234,6 +236,92 @@ gcloud logging tail "resource.type=cloud_run_revision AND resource.labels.servic
         "google_search_enabled": true
     }
 }
+```
+
+### Batch Image Analysis (/analyze-batch)
+
+```json
+{
+    "status": "success",
+    "results": [
+        {
+            "status": "success",
+            "data": {
+                "main_object": "string",
+                "confidence": 0.95,
+                "attributes": {
+                    "color": "string",
+                    "size": "string",
+                    "condition": "string",
+                    "distinguishing_features": ["string"]
+                },
+                "context": "string",
+                "visible_text": "string",
+                "brand": "string"
+            },
+            "metadata": {
+                "model": "gemini-2.0-flash-exp",
+                "processing_time": 1.23,
+                "timestamp": 1234567890.123,
+                "file_id": "uuid",
+                "storage_path": "string",
+                "upload_time": 0.5,
+                "analysis_time": 0.7,
+                "total_processing_time": 1.2,
+                "google_search_enabled": true,
+                "batch_info": {
+                    "batch_size": 4,
+                    "batch_index": 0,
+                    "position_in_batch": 0
+                }
+            }
+        }
+        // ... more results ...
+    ],
+    "metadata": {
+        "total_images": 10,
+        "total_batches": 3,
+        "max_images_per_batch": 4,
+        "total_processing_time": 5.67
+    }
+}
+```
+
+The batch analysis endpoint processes multiple images efficiently by:
+1. Grouping images into batches (max size configurable via MAX_IMAGES_IN_GRID env var, default 4)
+2. Creating a grid layout of images in each batch
+3. Analyzing each grid as a single image using Gemini Vision
+4. Returning individual results for each image along with batch processing metadata
+
+### Using cURL for Batch Analysis
+
+```bash
+# Test batch image analysis
+curl -X POST \
+    -F "files=@image1.jpg" \
+    -F "files=@image2.jpg" \
+    -F "files=@image3.jpg" \
+    -F "enable_google_search=true" \
+    https://$SERVICE_URL/analyze-batch
+```
+
+### Using Python for Batch Analysis
+
+```python
+import requests
+
+url = f"https://{SERVICE_URL}/analyze-batch"
+
+# Prepare multiple images
+files = [
+    ("files", ("image1.jpg", open("path/to/image1.jpg", "rb"), "image/jpeg")),
+    ("files", ("image2.jpg", open("path/to/image2.jpg", "rb"), "image/jpeg")),
+    ("files", ("image3.jpg", open("path/to/image3.jpg", "rb"), "image/jpeg"))
+]
+data = {"enable_google_search": "true"}
+
+response = requests.post(url, files=files, data=data)
+print(response.json())
 ```
 
 ## Error Handling
