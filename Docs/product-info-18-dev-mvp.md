@@ -8,8 +8,8 @@
 - [ ] Understand what does the ID from the MLKit inference mean
 - [ ] Have ways to detect motion and mark the anchors as dirty
 - [ ] Create method to capture smaller images that will be later used to be sent for the multimodal LLM
-- [ ] Integrate the images with multimodal LLM inference (start with Google)
-- [ ] Think of ways of optimizing the API calls, maybe create a grid and send them all as a single image with function calling?
+- [x] Integrate the images with multimodal LLM inference (start with Google)
+- [x] Think of ways of optimizing the API calls, maybe create a grid and send them all as a single image with function calling?
 - [ ] Have a way to store these images locally and explore pushing to a DB if necessary
 - [ ] Explore if the anchor data needs a timeseries DB
 - [ ] Build the subroutine to detect if something is being held? (combination of hand gestures and anchor/hand collision)
