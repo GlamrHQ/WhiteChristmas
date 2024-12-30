@@ -1,0 +1,7 @@
+numpy==2.2.1
+opencv-python-headless==4.10.0.84
+pyzbar==0.1.8
+firebase-functions==0.1.0
+firebase-admin>=6.0.0
+functions-framework==3.4.0
+pytest==7.0.0
