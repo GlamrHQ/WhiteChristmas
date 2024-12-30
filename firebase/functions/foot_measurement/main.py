@@ -118,7 +118,7 @@ def measure_foot(mask: np.ndarray, pixels_per_cm: float) -> Dict[str, float]:
     foot_contour = max(contours, key=cv2.contourArea)
     rect = cv2.minAreaRect(foot_contour)
     box = cv2.boxPoints(rect)
-    box = np.int0(box)
+    box = box.astype(np.int32)
     
     width = rect[1][0]
     height = rect[1][1]

@@ -10,9 +10,12 @@ firebase/
 │   ├── foot_measurement/         # Foot measurement function
 │   │   ├── main.py              # Function implementation
 │   │   ├── requirements.txt     # Dependencies
-│   │   └── .python-version      # Python version specification
+│   │   ├── .python-version      # Python version specification
+│   │   └── tests/               # Unit tests
+│   │       └── test_measurement.py
 ├── scripts/
-│   └── deploy.sh                # Deployment script
+│   ├── deploy.sh                # Deployment script
+│   └── run_tests.sh            # Test runner script
 └── firebase.json                # Firebase configuration
 ```
 
@@ -137,3 +140,31 @@ Firebase Functions has the following limits:
 - Individual file size limit: 100MB
 
 Current optimizations keep the deployment well within these limits while maintaining full functionality. 
+
+## Testing
+
+The project includes unit tests for each function. Tests are run in isolated environments to ensure consistency.
+
+### Running Tests
+
+The `run_tests.sh` script handles:
+1. Creating function-specific test environments with Python 3.10
+2. Installing all required dependencies
+3. Running pytest with verbose output
+4. Cleaning up environments after tests
+
+#### Run Tests for a Specific Function
+```bash
+./scripts/run_tests.sh foot_measurement
+```
+
+#### Run Tests for All Functions
+```bash
+./scripts/run_tests.sh
+```
+
+### Test Structure
+- Tests are located in the `tests` directory of each function
+- Uses pytest for test running and assertions
+- Includes fixtures for common test data
+- Tests core functionality in isolation 

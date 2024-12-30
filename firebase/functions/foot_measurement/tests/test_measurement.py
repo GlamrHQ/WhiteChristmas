@@ -36,6 +36,7 @@ def test_segment_foot(sample_image):
 def test_measure_foot():
     # Create a simple mask with known dimensions
     mask = np.zeros((1000, 1000), dtype=np.uint8)
+    # Draw a rectangle 400x400 pixels
     cv2.rectangle(mask, (300, 400), (700, 800), 255, -1)
     
     pixels_per_cm = 10  # 10 pixels = 1 cm
@@ -43,5 +44,6 @@ def test_measure_foot():
     
     assert "length" in measurements
     assert "width" in measurements
+    # Both width and length should be 40cm since we drew a square (400x400 pixels)
     assert measurements["length"] == 40.0  # 400 pixels / 10 pixels per cm
-    assert measurements["width"] == 20.0   # 200 pixels / 10 pixels per cm
+    assert measurements["width"] == 40.0   # 400 pixels / 10 pixels per cm
