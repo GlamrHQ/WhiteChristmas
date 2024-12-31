@@ -3,6 +3,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using Anaglyph.Firebase;
+using Anaglyph.Utils;
 
 namespace Anaglyph.DisplayCapture.ObjectDetection
 {
@@ -15,6 +17,7 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
         [SerializeField] private int minPositionsForAnchor = 15; // Minimum positions needed before creating anchor
         [SerializeField] private float outlierThreshold = 0.5f; // Meters - distance from median to be considered outlier
         [SerializeField] private float objectTimeoutSeconds = 5f; // Time after which to remove tracked objects
+        [SerializeField] private bool enableFirebaseStorage = true;
 
         public float Fov => horizontalFieldOfViewDegrees;
         private Matrix4x4 displayCaptureProjection;
@@ -230,8 +233,71 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
         {
             if (SpatialAnchorManager.Instance != null)
             {
-                await SpatialAnchorManager.Instance.CreateAnchorAtPoint(trackedObject.center);
+                var anchor = await SpatialAnchorManager.Instance.CreateAnchorAtPoint(trackedObject.center);
+
+                if (enableFirebaseStorage && anchor != null)
+                {
+                    try
+                    {
+                        // Get the current screen texture
+                        Texture2D screenTexture = DisplayCaptureManager.Instance.ScreenCaptureTexture;
+
+                        // Convert bounding box coordinates to screen coordinates
+                        Vector2Int size = DisplayCaptureManager.Instance.Size;
+                        ObjectDetector.BoundingBox bbox = GetBoundingBoxForTrackedObject(trackedObject.trackingId);
+
+                        int x = Mathf.RoundToInt(bbox.left);
+                        int y = Mathf.RoundToInt(size.y - bbox.bottom); // Flip Y coordinate
+                        int width = Mathf.RoundToInt(bbox.right - bbox.left);
+                        int height = Mathf.RoundToInt(bbox.bottom - bbox.top);
+
+                        // Crop and encode the image
+                        byte[] imageData = ImageUtils.CropAndEncodeImage(
+                            screenTexture,
+                            x,
+                            y,
+                            width,
+                            height
+                        );
+
+                        // Upload to Firebase Storage
+                        var (downloadUrl, storagePath) = await FirebaseService.Instance.UploadDetectedObjectImage(
+                            imageData,
+                            trackedObject.text,
+                            trackedObject.trackingId.ToString()
+                        );
+
+                        // Save metadata to Firestore
+                        await FirebaseService.Instance.SaveDetectedObjectData(
+                            trackedObject.text,
+                            trackedObject.trackingId,
+                            trackedObject.confidence,
+                            trackedObject.center,
+                            downloadUrl,
+                            storagePath,
+                            anchor.Uuid
+                        );
+                    }
+                    catch (System.Exception ex)
+                    {
+                        Debug.LogError($"Failed to save object data to Firebase: {ex.Message}");
+                    }
+                }
             }
+        }
+
+        private ObjectDetector.BoundingBox GetBoundingBoxForTrackedObject(int trackingId)
+        {
+            // Find the original detection result for this tracking ID
+            foreach (var result in objectDetector.LastResults)
+            {
+                if (result.trackingId == trackingId)
+                {
+                    return result.boundingBox;
+                }
+            }
+
+            throw new System.InvalidOperationException($"No bounding box found for tracking ID {trackingId}");
         }
 
         private static Vector3 Unproject(Matrix4x4 projection, Vector2 uv)

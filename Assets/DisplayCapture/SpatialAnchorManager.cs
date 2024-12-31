@@ -32,7 +32,7 @@ namespace Anaglyph.DisplayCapture
             }
         }
 
-        public async Task CreateAnchorAtPoint(Vector3 point)
+        public async Task<OVRSpatialAnchor> CreateAnchorAtPoint(Vector3 point)
         {
             GameObject anchorObject = new GameObject("SpatialAnchor");
             anchorObject.transform.position = point;
@@ -46,7 +46,7 @@ namespace Anaglyph.DisplayCapture
                 Debug.LogError($"Unable to create anchor.");
                 _spatialAnchors.Remove(spatialAnchor);
                 Destroy(anchorObject);
-                return;
+                return null;
             }
 
             if (enableDebugVisualization)
@@ -55,6 +55,7 @@ namespace Anaglyph.DisplayCapture
             }
 
             SaveAnchor(spatialAnchor);
+            return spatialAnchor;
         }
 
         private void CreateDebugVisualization(Transform parent)
@@ -98,7 +99,7 @@ namespace Anaglyph.DisplayCapture
 
             Debug.Log($"Attempting to load {uuids.Count} saved anchors...");
             int totalSuccessfullyBound = 0;
-            
+
             foreach (var uuidBatch in BatchUuids(uuids))
             {
                 var unboundAnchors = new List<OVRSpatialAnchor.UnboundAnchor>();
@@ -209,7 +210,7 @@ namespace Anaglyph.DisplayCapture
             {
                 Debug.Log("All saved anchors erased successfully.");
                 PlayerPrefs.DeleteKey(AnchorUuidsKey);
-                
+
                 // Clean up all anchor GameObjects and references
                 foreach (var anchor in _spatialAnchors)
                 {

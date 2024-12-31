@@ -54,6 +54,9 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
 
         private AndroidInterface androidInterface;
 
+        private Result[] lastResults;
+        public Result[] LastResults => lastResults;
+
         private void Awake()
         {
             androidInterface = new AndroidInterface(gameObject);
@@ -80,6 +83,7 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
         private void OnObjectResults(string json)
         {
             Results results = JsonUtility.FromJson<Results>(json);
+            lastResults = results.results;
             OnReadObjects.Invoke(results.results);
         }
 #pragma warning restore IDE0051 // Remove unused private members
