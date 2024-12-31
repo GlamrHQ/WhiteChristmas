@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using Anaglyph.Firebase;
-using Anaglyph.Utils;
+using Anaglyph.Utilities;
 
 namespace Anaglyph.DisplayCapture.ObjectDetection
 {

@@ -100,7 +100,7 @@ namespace Anaglyph.Firebase
                 };
 
                 await imageRef.PutBytesAsync(imageData, metadata);
-                string downloadUrl = await imageRef.GetDownloadUrlAsync();
+                string downloadUrl = (await imageRef.GetDownloadUrlAsync()).AbsoluteUri;
 
                 return (downloadUrl, filename);
             }
