@@ -9,7 +9,10 @@ export const db = admin.firestore();
 
 export async function getShoeNames(
   _input: { dummy?: boolean } = {}
-): Promise<string[]> {
+): Promise<{ name: string; documentId: string }[]> {
   const snapshot = await db.collection("shoes").get();
-  return snapshot.docs.map((doc) => doc.data().name);
+  return snapshot.docs.map((doc) => ({
+    name: doc.data().name,
+    documentId: doc.id,
+  }));
 }

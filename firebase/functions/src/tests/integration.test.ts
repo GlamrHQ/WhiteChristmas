@@ -71,11 +71,35 @@ async function testShoeDetection() {
     const result = await detectShoe({ data: imageBase64 });
 
     console.log("Result:", result.data);
-    console.log(
-      "Test passed:",
-      ["UNKNOWN_SHOE", "SHOE_NOT_FOUND"].includes(result.data as string) ||
-        typeof result.data === "string"
-    );
+
+    // Type guard for shoe detection result
+    interface ShoeDetectionResult {
+      name: string;
+      documentId: string;
+    }
+
+    function isValidShoeResult(data: any): data is ShoeDetectionResult {
+      return (
+        typeof data === "object" &&
+        data !== null &&
+        typeof data.name === "string" &&
+        typeof data.documentId === "string"
+      );
+    }
+
+    // Validate the result
+    if (!isValidShoeResult(result.data)) {
+      throw new Error("Invalid result format from shoe detection");
+    }
+
+    const isValidResult =
+      (result.data.name === "UNKNOWN_SHOE" && result.data.documentId === "0") ||
+      (result.data.name === "SHOE_NOT_FOUND" &&
+        result.data.documentId === "-1") ||
+      (typeof result.data.documentId === "string" &&
+        result.data.documentId.length > 0);
+
+    console.log("Test passed:", isValidResult);
   } catch (error) {
     console.error("Shoe detection test failed:", error);
   }

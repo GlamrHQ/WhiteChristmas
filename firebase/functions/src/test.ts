@@ -20,13 +20,27 @@ const ai = genkit({
 const getShoesList = ai.defineTool(
   {
     name: "getShoesList",
-    description: "Gets the list of all shoe names from the database",
-    inputSchema: z.object({}),
-    outputSchema: z.array(z.string()),
+    description:
+      "Gets the list of all shoe names and their document IDs from the database",
+    inputSchema: z.object({
+      dummy: z
+        .boolean()
+        .optional()
+        .describe("Dummy parameter to satisfy API requirements"),
+    }),
+    outputSchema: z.array(
+      z.object({
+        name: z.string(),
+        documentId: z.string(),
+      })
+    ),
   },
   async () => {
     const snapshot = await admin.firestore().collection("shoes").get();
-    return snapshot.docs.map((doc) => doc.data().name);
+    return snapshot.docs.map((doc) => ({
+      name: doc.data().name,
+      documentId: doc.id,
+    }));
   }
 );
 

@@ -5,18 +5,30 @@ import { getShoeNames } from "../../utils/firestore";
 import { ShoeDetectionInputSchema } from "./types";
 import { z } from "genkit";
 
-// Tool to fetch shoes from Firestore
+// Define the output schema for shoe detection
+const ShoeDetectionOutputSchema = z.object({
+  name: z.string(),
+  documentId: z.string(),
+});
+
+// Tool to fetch shoes from Firestore with their document IDs
 const getShoesList = ai.defineTool(
   {
     name: "getShoesList",
-    description: "Gets the list of all shoe names from the database",
+    description:
+      "Gets the list of all shoe names and their document IDs from the database",
     inputSchema: z.object({
       dummy: z
         .boolean()
         .optional()
         .describe("Dummy parameter to satisfy API requirements"),
     }),
-    outputSchema: z.array(z.string()),
+    outputSchema: z.array(
+      z.object({
+        name: z.string(),
+        documentId: z.string(),
+      })
+    ),
   },
   getShoeNames
 );
@@ -26,7 +38,7 @@ export const detectShoe = onFlow(
   {
     name: "detectShoe",
     inputSchema: ShoeDetectionInputSchema,
-    outputSchema: z.string(),
+    outputSchema: ShoeDetectionOutputSchema,
     authPolicy: firebaseAuth((user) => {
       //   if (!user.email_verified) {
       //     throw new Error("Verified email required to use this function");
@@ -80,33 +92,31 @@ export const detectShoe = onFlow(
     // Try to extract just the shoe name if it's embedded in a sentence
     const shoes = await getShoesList({});
     for (const shoe of shoes) {
-      if (result.includes(shoe)) {
-        result = shoe;
-        break;
+      if (result.includes(shoe.name)) {
+        return {
+          name: shoe.name,
+          documentId: shoe.documentId,
+        };
       }
     }
 
-    // If no shoe name was found in the text, check for status keywords
-    if (!shoes.includes(result)) {
-      if (result.includes("UNKNOWN_SHOE")) {
-        result = "UNKNOWN_SHOE";
-      } else if (result.includes("SHOE_NOT_FOUND")) {
-        result = "SHOE_NOT_FOUND";
-      }
+    // Handle special cases
+    if (result.includes("UNKNOWN_SHOE")) {
+      return {
+        name: "UNKNOWN_SHOE",
+        documentId: "0", // Special case for unknown shoe
+      };
+    } else if (result.includes("SHOE_NOT_FOUND")) {
+      return {
+        name: "SHOE_NOT_FOUND",
+        documentId: "-1", // Special case for no shoe found
+      };
     }
 
-    // Log the cleaned result
-    console.log("Cleaned shoe detection result:", result);
-    console.log("Number of shoes in database:", shoes.length);
-
-    // Final validation
-    if (
-      !["UNKNOWN_SHOE", "SHOE_NOT_FOUND"].includes(result) &&
-      !shoes.includes(result)
-    ) {
-      return "UNKNOWN_SHOE";
-    }
-
-    return result;
+    // If no match found, return as unknown shoe
+    return {
+      name: "UNKNOWN_SHOE",
+      documentId: "0",
+    };
   }
 );

@@ -78,7 +78,7 @@ namespace Anaglyph.Firebase
             }
         }
 
-        public async Task<string> DetectShoe(byte[] imageData)
+        public async Task<(string name, string documentId)> DetectShoe(byte[] imageData)
         {
             if (!isInitialized)
             {
@@ -100,8 +100,15 @@ namespace Anaglyph.Firebase
                 var function = functions.GetHttpsCallable("detectShoe");
                 var result = await function.CallAsync(data);
 
-                // Return the detected shoe name or status
-                return result.Data.ToString();
+                // Parse the result
+                if (result.Data is Dictionary<string, object> resultDict &&
+                    resultDict.TryGetValue("name", out object nameObj) &&
+                    resultDict.TryGetValue("documentId", out object documentIdObj))
+                {
+                    return (nameObj.ToString(), documentIdObj.ToString());
+                }
+
+                throw new InvalidOperationException("Invalid response format from shoe detection function");
             }
             catch (Exception ex)
             {
@@ -155,7 +162,9 @@ namespace Anaglyph.Firebase
             Vector3 worldPosition,
             string imageUrl,
             string storagePath,
-            Guid anchorId)
+            Guid anchorId,
+            string detectedShoeId,
+            string detectedShoeName)
         {
             if (!isInitialized)
             {
@@ -179,6 +188,8 @@ namespace Anaglyph.Firebase
                     { "imageUrl", imageUrl },
                     { "storagePath", storagePath },
                     { "anchorId", anchorId.ToString() },
+                    { "detectedShoeId", detectedShoeId },
+                    { "detectedShoeName", detectedShoeName },
                     { "timestamp", Timestamp.FromDateTime(DateTime.UtcNow) }
                 };
 

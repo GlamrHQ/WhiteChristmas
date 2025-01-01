@@ -6,6 +6,7 @@ using UnityEngine;
 using Anaglyph.Firebase;
 using Anaglyph.Utilities;
 using System.Threading.Tasks;
+using Firebase.Firestore;
 
 namespace Anaglyph.DisplayCapture.ObjectDetection
 {
@@ -275,16 +276,37 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
 
                         // Get results
                         var (downloadUrl, storagePath) = uploadTask.Result;
-                        string detectedShoe = detectShoeTask.Result;
+                        var (shoeName, shoeDocumentId) = detectShoeTask.Result;
 
                         // If we got a valid shoe detection (not UNKNOWN_SHOE or SHOE_NOT_FOUND), use it
-                        string objectLabel = detectedShoe;
-                        if (detectedShoe == "UNKNOWN_SHOE" || detectedShoe == "SHOE_NOT_FOUND")
+                        string objectLabel = shoeName;
+                        if (shoeName == "UNKNOWN_SHOE" || shoeName == "SHOE_NOT_FOUND")
                         {
                             objectLabel = trackedObject.text; // Fallback to original detection
                         }
 
-                        // Save metadata to Firestore
+                        // Save metadata to Firestore with additional shoe information
+                        var detectedObjectData = new Dictionary<string, object>
+                        {
+                            { "objectLabel", objectLabel },
+                            { "trackingId", trackedObject.trackingId },
+                            { "confidence", trackedObject.confidence },
+                            { "worldPosition", new Dictionary<string, float>
+                                {
+                                    { "x", trackedObject.center.x },
+                                    { "y", trackedObject.center.y },
+                                    { "z", trackedObject.center.z }
+                                }
+                            },
+                            { "imageUrl", downloadUrl },
+                            { "storagePath", storagePath },
+                            { "anchorId", anchor.Uuid.ToString() },
+                            { "detectedShoeId", shoeDocumentId }, // Add the shoe document ID
+                            { "detectedShoeName", shoeName }, // Add the detected shoe name
+                            { "timestamp", Timestamp.FromDateTime(DateTime.UtcNow) }
+                        };
+
+                        // Save to Firestore using the public method
                         await FirebaseService.Instance.SaveDetectedObjectData(
                             objectLabel,
                             trackedObject.trackingId,
@@ -292,7 +314,9 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
                             trackedObject.center,
                             downloadUrl,
                             storagePath,
-                            anchor.Uuid
+                            anchor.Uuid,
+                            shoeDocumentId,  // Add the shoe document ID
+                            shoeName         // Add the detected shoe name
                         );
                     }
                     catch (System.Exception ex)
