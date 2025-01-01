@@ -20,6 +20,7 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
         [SerializeField] private float outlierThreshold = 0.5f; // Meters - distance from median to be considered outlier
         [SerializeField] private float objectTimeoutSeconds = 5f; // Time after which to remove tracked objects
         [SerializeField] private bool enableFirebaseStorage = true;
+        [SerializeField] private string roomId = "default"; // Add this field for room identification
 
         public float Fov => horizontalFieldOfViewDegrees;
         private Matrix4x4 displayCaptureProjection;
@@ -231,6 +232,15 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
             return depthSampleResult[0];
         }
 
+        private void Start()
+        {
+            if (enableFirebaseStorage)
+            {
+                // Initialize the anchor mapping manager with the current room ID
+                _ = AnchorMappingManager.Instance.Initialize(roomId);
+            }
+        }
+
         private async System.Threading.Tasks.Task CreateAnchorForTrackedObject(TrackedObject trackedObject)
         {
             if (SpatialAnchorManager.Instance != null)
@@ -285,28 +295,7 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
                             objectLabel = trackedObject.text; // Fallback to original detection
                         }
 
-                        // Save metadata to Firestore with additional shoe information
-                        var detectedObjectData = new Dictionary<string, object>
-                        {
-                            { "objectLabel", objectLabel },
-                            { "trackingId", trackedObject.trackingId },
-                            { "confidence", trackedObject.confidence },
-                            { "worldPosition", new Dictionary<string, float>
-                                {
-                                    { "x", trackedObject.center.x },
-                                    { "y", trackedObject.center.y },
-                                    { "z", trackedObject.center.z }
-                                }
-                            },
-                            { "imageUrl", downloadUrl },
-                            { "storagePath", storagePath },
-                            { "anchorId", anchor.Uuid.ToString() },
-                            { "detectedShoeId", shoeDocumentId }, // Add the shoe document ID
-                            { "detectedShoeName", shoeName }, // Add the detected shoe name
-                            { "timestamp", Timestamp.FromDateTime(DateTime.UtcNow) }
-                        };
-
-                        // Save to Firestore using the public method
+                        // Save metadata to Firestore
                         await FirebaseService.Instance.SaveDetectedObjectData(
                             objectLabel,
                             trackedObject.trackingId,
@@ -315,9 +304,18 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
                             downloadUrl,
                             storagePath,
                             anchor.Uuid,
-                            shoeDocumentId,  // Add the shoe document ID
-                            shoeName         // Add the detected shoe name
+                            shoeDocumentId,
+                            shoeName
                         );
+
+                        // Add the anchor mapping if we have a valid shoe document ID
+                        if (shoeDocumentId != "0" && shoeDocumentId != "-1")
+                        {
+                            await AnchorMappingManager.Instance.AddAnchorMapping(
+                                anchor.Uuid.ToString(),
+                                shoeDocumentId
+                            );
+                        }
                     }
                     catch (System.Exception ex)
                     {

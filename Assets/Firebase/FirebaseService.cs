@@ -36,6 +36,17 @@ namespace Anaglyph.Firebase
 
         [SerializeField] private string storageBucketUrl = "your-project-id.appspot.com";
 
+        // Public property to access Firestore
+        public FirebaseFirestore Firestore
+        {
+            get
+            {
+                if (!isInitialized)
+                    throw new InvalidOperationException("Firebase is not initialized");
+                return firestore;
+            }
+        }
+
         private void Awake()
         {
             if (instance == null)
