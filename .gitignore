@@ -121,3 +121,19 @@ wheels/
 .AppleDouble
 .LSOverride
 ._*
+
+# Firebase
+firebase-debug.log
+firebase-debug.*.log
+.firebase/
+**/service-account*.json
+.runtimeconfig.json
+**/ui-debug.log
+**/database-debug.log
+**/pubsub-debug.log
+**/firestore-debug.log
+**/functions/.env
+**/functions/lib/
+**/functions/.env.*
+**/functions/coverage/
+**/functions/node_modules/
