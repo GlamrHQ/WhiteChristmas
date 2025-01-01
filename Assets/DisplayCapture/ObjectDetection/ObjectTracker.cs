@@ -5,6 +5,7 @@ using System.Linq;
 using UnityEngine;
 using Anaglyph.Firebase;
 using Anaglyph.Utilities;
+using System.Threading.Tasks;
 
 namespace Anaglyph.DisplayCapture.ObjectDetection
 {
@@ -260,16 +261,32 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
                             height
                         );
 
-                        // Upload to Firebase Storage
-                        var (downloadUrl, storagePath) = await FirebaseService.Instance.UploadDetectedObjectImage(
+                        // Run image upload and shoe detection in parallel
+                        var uploadTask = FirebaseService.Instance.UploadDetectedObjectImage(
                             imageData,
                             trackedObject.text,
                             trackedObject.trackingId.ToString()
                         );
 
+                        var detectShoeTask = FirebaseService.Instance.DetectShoe(imageData);
+
+                        // Wait for both tasks to complete
+                        await Task.WhenAll(uploadTask, detectShoeTask);
+
+                        // Get results
+                        var (downloadUrl, storagePath) = uploadTask.Result;
+                        string detectedShoe = detectShoeTask.Result;
+
+                        // If we got a valid shoe detection (not UNKNOWN_SHOE or SHOE_NOT_FOUND), use it
+                        string objectLabel = detectedShoe;
+                        if (detectedShoe == "UNKNOWN_SHOE" || detectedShoe == "SHOE_NOT_FOUND")
+                        {
+                            objectLabel = trackedObject.text; // Fallback to original detection
+                        }
+
                         // Save metadata to Firestore
                         await FirebaseService.Instance.SaveDetectedObjectData(
-                            trackedObject.text,
+                            objectLabel,
                             trackedObject.trackingId,
                             trackedObject.confidence,
                             trackedObject.center,

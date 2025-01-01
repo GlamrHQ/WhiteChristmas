@@ -7,6 +7,7 @@ using Firebase.Storage;
 using Firebase.Firestore;
 using Firebase.Extensions;
 using Firebase.Auth;
+using Firebase.Functions;
 
 namespace Anaglyph.Firebase
 {
@@ -30,6 +31,7 @@ namespace Anaglyph.Firebase
         private FirebaseStorage storage;
         private FirebaseFirestore firestore;
         private FirebaseAuth auth;
+        private FirebaseFunctions functions;
         private bool isInitialized = false;
 
         [SerializeField] private string storageBucketUrl = "your-project-id.appspot.com";
@@ -64,12 +66,47 @@ namespace Anaglyph.Firebase
                 // Initialize Firestore
                 firestore = FirebaseFirestore.DefaultInstance;
 
+                // Initialize Functions
+                functions = FirebaseFunctions.DefaultInstance;
+
                 isInitialized = true;
                 Debug.Log("Firebase initialized successfully");
             }
             catch (Exception ex)
             {
                 Debug.LogError($"Failed to initialize Firebase: {ex.Message}");
+            }
+        }
+
+        public async Task<string> DetectShoe(byte[] imageData)
+        {
+            if (!isInitialized)
+            {
+                throw new InvalidOperationException("Firebase is not initialized");
+            }
+
+            try
+            {
+                // Convert image data to base64
+                string base64Image = Convert.ToBase64String(imageData);
+
+                // Create data object for the function call
+                var data = new Dictionary<string, object>
+                {
+                    { "data", base64Image }
+                };
+
+                // Call the cloud function
+                var function = functions.GetHttpsCallable("detectShoe");
+                var result = await function.CallAsync(data);
+
+                // Return the detected shoe name or status
+                return result.Data.ToString();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Failed to detect shoe: {ex.Message}");
+                throw;
             }
         }
 
