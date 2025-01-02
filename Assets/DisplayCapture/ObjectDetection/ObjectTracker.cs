@@ -241,10 +241,21 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
             }
         }
 
-        private async System.Threading.Tasks.Task CreateAnchorForTrackedObject(TrackedObject trackedObject)
+        private async Task CreateAnchorForTrackedObject(TrackedObject trackedObject)
         {
             if (SpatialAnchorManager.Instance != null)
             {
+                // Check if there's already an anchor near this position
+                var existingAnchor = SpatialAnchorManager.Instance.SpatialAnchors
+                    .FirstOrDefault(a => Vector3.Distance(a.transform.position, trackedObject.center) < 0.1f);
+
+                if (existingAnchor != null)
+                {
+                    // Update existing anchor mapping if needed
+                    await UpdateAnchorMapping(existingAnchor, trackedObject);
+                    return;
+                }
+
                 var anchor = await SpatialAnchorManager.Instance.CreateAnchorAtPoint(trackedObject.center);
 
                 if (enableFirebaseStorage && anchor != null)
@@ -325,7 +336,74 @@ namespace Anaglyph.DisplayCapture.ObjectDetection
             }
         }
 
-        private ObjectDetector.BoundingBox GetBoundingBoxForTrackedObject(int trackingId)
+        private async Task UpdateAnchorMapping(OVRSpatialAnchor existingAnchor, TrackedObject trackedObject)
+        {
+            if (!enableFirebaseStorage) return;
+
+            try
+            {
+                // Get the current screen texture and process image
+                Texture2D screenTexture = DisplayCaptureManager.Instance.ScreenCaptureTexture;
+                Vector2Int size = DisplayCaptureManager.Instance.Size;
+                ObjectDetector.BoundingBox bbox = GetBoundingBoxForTrackedObject(trackedObject.trackingId);
+
+                int x = Mathf.RoundToInt(bbox.left);
+                int y = Mathf.RoundToInt(size.y - bbox.bottom);
+                int width = Mathf.RoundToInt(bbox.right - bbox.left);
+                int height = Mathf.RoundToInt(bbox.bottom - bbox.top);
+
+                byte[] imageData = ImageUtils.CropAndEncodeImage(
+                    screenTexture,
+                    x,
+                    y,
+                    width,
+                    height
+                );
+
+                // Detect shoe from image
+                var (shoeName, shoeDocumentId) = await FirebaseService.Instance.DetectShoe(imageData);
+
+                // Only update if we have a valid shoe detection
+                if (shoeDocumentId != "0" && shoeDocumentId != "-1")
+                {
+                    var currentShoeDocId = AnchorMappingManager.Instance.GetShoeDocumentId(existingAnchor.Uuid.ToString());
+
+                    // Update mapping if it's different
+                    if (currentShoeDocId != shoeDocumentId)
+                    {
+                        await AnchorMappingManager.Instance.AddAnchorMapping(
+                            existingAnchor.Uuid.ToString(),
+                            shoeDocumentId
+                        );
+
+                        // Upload the new image and save updated metadata
+                        var (downloadUrl, storagePath) = await FirebaseService.Instance.UploadDetectedObjectImage(
+                            imageData,
+                            shoeName,
+                            trackedObject.trackingId.ToString()
+                        );
+
+                        await FirebaseService.Instance.SaveDetectedObjectData(
+                            shoeName,
+                            trackedObject.trackingId,
+                            trackedObject.confidence,
+                            trackedObject.center,
+                            downloadUrl,
+                            storagePath,
+                            existingAnchor.Uuid,
+                            shoeDocumentId,
+                            shoeName
+                        );
+                    }
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"Failed to update anchor mapping: {ex.Message}");
+            }
+        }
+
+        public ObjectDetector.BoundingBox GetBoundingBoxForTrackedObject(int trackingId)
         {
             // Find the original detection result for this tracking ID
             foreach (var result in objectDetector.LastResults)
