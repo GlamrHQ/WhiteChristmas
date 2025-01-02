@@ -30,6 +30,7 @@ namespace Anaglyph.ShoeInteraction
             public string Price;
             public string Size;
             public string DocumentId;
+            public OVRSpatialAnchor.SaveOptions SaveOptions;
         }
 
         private void Start()
@@ -47,6 +48,7 @@ namespace Anaglyph.ShoeInteraction
             interactionManager.OnShoePickedUp += HandleShoePickedUp;
             interactionManager.OnShoeDropped += HandleShoeDropped;
             interactionManager.OnShoePositionUpdated += UpdatePanelPosition;
+            interactionManager.OnShoePlacedOnShelf += HandleShoePlacedOnShelf;
 
             // Load any existing anchors when the scene starts
             _ = LoadExistingAnchors();
@@ -59,6 +61,7 @@ namespace Anaglyph.ShoeInteraction
                 interactionManager.OnShoePickedUp -= HandleShoePickedUp;
                 interactionManager.OnShoeDropped -= HandleShoeDropped;
                 interactionManager.OnShoePositionUpdated -= UpdatePanelPosition;
+                interactionManager.OnShoePlacedOnShelf -= HandleShoePlacedOnShelf;
             }
 
             // Clean up active anchors
@@ -66,9 +69,7 @@ namespace Anaglyph.ShoeInteraction
             {
                 if (anchor != null)
                 {
-                    // First erase from persistent storage
                     await anchor.EraseAnchorAsync();
-                    // Then destroy the GameObject
                     Destroy(anchor.gameObject);
                 }
             }
@@ -105,21 +106,9 @@ namespace Anaglyph.ShoeInteraction
                 activePanels.Remove(trackingId);
             }
 
-            // Clean up the anchor if it exists
-            if (activeAnchors.TryGetValue(trackingId, out var anchor))
-            {
-                // Save the anchor's UUID before destroying it
-                var anchorUuid = anchor.Uuid.ToString();
-                var shoeInfo = shoeInfoCache[trackingId];
-
-                // Update the anchor mapping
-                await AnchorMappingManager.Instance.AddAnchorMapping(
-                    anchorUuid,
-                    shoeInfo.DocumentId
-                );
-
-                activeAnchors.Remove(trackingId);
-            }
+            // Note: We don't clean up the anchor here anymore
+            // It will be handled when the shoe is placed on the shelf
+            // or if it's picked up again
         }
 
         private void UpdatePanelPosition(int trackingId, Vector3 shoePosition)
@@ -244,6 +233,32 @@ namespace Anaglyph.ShoeInteraction
                 .Where(a => Vector3.Distance(a.transform.position, position) < maxAnchorDistance)
                 .OrderBy(a => Vector3.Distance(a.transform.position, position))
                 .FirstOrDefault();
+        }
+
+        private async void HandleShoePlacedOnShelf(int trackingId, Vector3 position)
+        {
+            if (!shoeInfoCache.TryGetValue(trackingId, out var shoeInfo)) return;
+            if (!activeAnchors.TryGetValue(trackingId, out var anchor)) return;
+
+            try
+            {
+                // Update the anchor mapping with the final shelf position
+                await AnchorMappingManager.Instance.AddAnchorMapping(
+                    anchor.Uuid.ToString(),
+                    shoeInfo.DocumentId
+                );
+
+                // Save the anchor with additional metadata if needed
+                var saveResult = await anchor.SaveAnchorAsync();
+                if (!saveResult.Success)
+                {
+                    Debug.LogError($"Failed to save shelf anchor. Status: {saveResult.Status}");
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"Failed to update shelf anchor mapping: {ex.Message}");
+            }
         }
     }
 }

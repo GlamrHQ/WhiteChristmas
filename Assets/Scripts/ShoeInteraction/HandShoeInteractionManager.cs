@@ -17,14 +17,18 @@ namespace Anaglyph.ShoeInteraction
         [SerializeField] private float stableHoldDuration = 0.5f; // Time in seconds before considering hold stable
         [SerializeField] private int minStableFrames = 15; // Minimum frames to consider position stable
         [SerializeField] private float maxAnchorDistance = 3f; // Maximum distance for anchor creation/update
+        [SerializeField] private float shelfStabilityThreshold = 0.005f; // 5mm threshold for shelf stability
+        [SerializeField] private int shelfStableFramesRequired = 30; // Frames required to consider shoe stable on shelf
 
         private Dictionary<int, ShoeHoldingState> shoeHoldingStates = new();
         private Dictionary<int, Vector3> lastKnownPositions = new();
         private Dictionary<int, int> stableFrameCount = new();
+        private Dictionary<int, int> shelfStableFrameCount = new(); // Track stability after dropping
 
         public event Action<int, Vector3> OnShoePickedUp;
         public event Action<int, Vector3> OnShoeDropped;
         public event Action<int, Vector3> OnShoePositionUpdated;
+        public event Action<int, Vector3> OnShoePlacedOnShelf;
 
         private class ShoeHoldingState
         {
@@ -33,6 +37,8 @@ namespace Anaglyph.ShoeInteraction
             public bool IsStable;
             public bool IsLeftHand;
             public OVRSpatialAnchor CurrentAnchor;
+            public bool IsBeingPlaced; // Track if we're in the process of placing on shelf
+            public Vector3 LastStablePosition;
         }
 
         private void Start()
@@ -75,6 +81,7 @@ namespace Anaglyph.ShoeInteraction
                 shoeHoldingStates.Remove(id);
                 lastKnownPositions.Remove(id);
                 stableFrameCount.Remove(id);
+                shelfStableFrameCount.Remove(id);
             }
         }
 
@@ -97,28 +104,28 @@ namespace Anaglyph.ShoeInteraction
                     HoldStartTime = 0,
                     IsStable = false,
                     IsLeftHand = false,
-                    CurrentAnchor = null
+                    CurrentAnchor = null,
+                    IsBeingPlaced = false,
+                    LastStablePosition = currentPosition
                 };
                 lastKnownPositions[trackingId] = currentPosition;
                 stableFrameCount[trackingId] = 0;
+                shelfStableFrameCount[trackingId] = 0;
             }
 
             var state = shoeHoldingStates[trackingId];
             var lastPosition = lastKnownPositions[trackingId];
 
-            // Check if either hand is close to the shoe using index finger tips
+            // Check hand proximity
             var leftHandPos = leftIndexTipTransform.position;
             var rightHandPos = rightIndexTipTransform.position;
-
             var isNearLeftHand = Vector3.Distance(currentPosition, leftHandPos) < holdingThreshold;
             var isNearRightHand = Vector3.Distance(currentPosition, rightHandPos) < holdingThreshold;
-
             var isCurrentlyHeld = isNearLeftHand || isNearRightHand;
-            var isLeftHand = isNearLeftHand;
 
             // Check position stability
             var positionDelta = Vector3.Distance(currentPosition, lastPosition);
-            var isPositionStable = positionDelta < 0.01f; // 1cm threshold for stability
+            var isPositionStable = positionDelta < 0.01f;
 
             if (isPositionStable)
             {
@@ -129,48 +136,71 @@ namespace Anaglyph.ShoeInteraction
                 stableFrameCount[trackingId] = 0;
             }
 
-            // Update holding state
+            // Handle shoe being picked up
             if (isCurrentlyHeld && !state.IsHeld)
             {
-                // Start holding
                 state.IsHeld = true;
                 state.HoldStartTime = Time.time;
-                state.IsLeftHand = isLeftHand;
+                state.IsLeftHand = isNearLeftHand;
+                state.IsBeingPlaced = false;
+                shelfStableFrameCount[trackingId] = 0;
                 OnShoePickedUp?.Invoke(trackingId, currentPosition);
 
                 // Create or update anchor when shoe is picked up
                 await UpdateAnchorForShoe(trackingId, currentPosition);
             }
+            // Handle shoe being dropped
             else if (!isCurrentlyHeld && state.IsHeld)
             {
-                // Stop holding
                 state.IsHeld = false;
                 state.IsStable = false;
+                state.IsBeingPlaced = true;
+                state.LastStablePosition = currentPosition;
                 OnShoeDropped?.Invoke(trackingId, currentPosition);
             }
+            // Handle shoe being held
             else if (state.IsHeld)
             {
-                // Update stability state
                 var holdDuration = Time.time - state.HoldStartTime;
                 var hasEnoughStableFrames = stableFrameCount[trackingId] >= minStableFrames;
 
                 if (holdDuration >= stableHoldDuration && hasEnoughStableFrames && !state.IsStable)
                 {
                     state.IsStable = true;
-                    // Update anchor when shoe becomes stable
                     await UpdateAnchorForShoe(trackingId, currentPosition);
                 }
 
-                // Update anchor if shoe has moved significantly
-                if (positionDelta > 0.1f) // 10cm threshold for significant movement
+                if (positionDelta > 0.1f)
                 {
                     await UpdateAnchorForShoe(trackingId, currentPosition);
                 }
 
                 OnShoePositionUpdated?.Invoke(trackingId, currentPosition);
             }
+            // Handle shoe being placed on shelf
+            else if (state.IsBeingPlaced)
+            {
+                // Check if the shoe has stabilized on the shelf
+                var shelfDelta = Vector3.Distance(currentPosition, state.LastStablePosition);
 
-            // Update last known position
+                if (shelfDelta < shelfStabilityThreshold)
+                {
+                    shelfStableFrameCount[trackingId]++;
+
+                    if (shelfStableFrameCount[trackingId] >= shelfStableFramesRequired)
+                    {
+                        state.IsBeingPlaced = false;
+                        await CreateShelfAnchor(trackingId, currentPosition);
+                        OnShoePlacedOnShelf?.Invoke(trackingId, currentPosition);
+                    }
+                }
+                else
+                {
+                    shelfStableFrameCount[trackingId] = 0;
+                    state.LastStablePosition = currentPosition;
+                }
+            }
+
             lastKnownPositions[trackingId] = currentPosition;
         }
 
@@ -226,6 +256,32 @@ namespace Anaglyph.ShoeInteraction
                     {
                         state.CurrentAnchor = newAnchor;
                     }
+                }
+            }
+        }
+
+        private async Task CreateShelfAnchor(int trackingId, Vector3 position)
+        {
+            var state = shoeHoldingStates[trackingId];
+
+            // Clean up any existing anchors
+            if (state.CurrentAnchor != null)
+            {
+                await state.CurrentAnchor.EraseAnchorAsync();
+                Destroy(state.CurrentAnchor.gameObject);
+                state.CurrentAnchor = null;
+            }
+
+            // Create new anchor at shelf position
+            var newAnchor = await SpatialAnchorManager.Instance.CreateAnchorAtPoint(position);
+            if (newAnchor != null)
+            {
+                state.CurrentAnchor = newAnchor;
+                // Save the anchor
+                var saveResult = await newAnchor.SaveAnchorAsync();
+                if (!saveResult.Success)
+                {
+                    Debug.LogError($"Failed to save shelf anchor. Status: {saveResult.Status}");
                 }
             }
         }
