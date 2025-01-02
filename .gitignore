@@ -137,3 +137,6 @@ firebase-debug.*.log
 **/functions/.env.*
 **/functions/coverage/
 **/functions/node_modules/
+
+# Node modules
+node_modules/
