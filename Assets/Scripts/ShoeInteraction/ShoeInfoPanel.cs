@@ -130,14 +130,14 @@ namespace Anaglyph.ShoeInteraction
 
         private void OnColorSelected(string color)
         {
-            var variants = ShoeDataCache.Instance.GetShoeVariants(currentShoeId);
-            var selectedVariant = variants.FirstOrDefault(v => v.Color == color);
-            if (selectedVariant != null)
-            {
-                priceText.text = $"${selectedVariant.Price:F2}";
-                // Update 3D model if needed
-                // UpdateShoeModel(selectedVariant.Model3dUrl);
-            }
+            // var variants = ShoeDataCache.Instance.GetShoeVariants(currentShoeId);
+            // var selectedVariant = variants.FirstOrDefault(v => v.Color == color);
+            // if (selectedVariant != null)
+            // {
+            //     priceText.text = $"${selectedVariant.Price:F2}";
+            //     // Update 3D model if needed
+            //     // UpdateShoeModel(selectedVariant.Model3dUrl);
+            // }
         }
 
         private void OnSizeSelected(float size)
