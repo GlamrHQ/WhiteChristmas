@@ -1,14 +1,21 @@
-# Quest Display Access Demo
+# White Christmas - Local Object Detection in Quest with Gemini API for Image understanding
 
-Developers want camera access on the Meta Quest. Meta hasn't let us have it yet. The next best thing is display access. Thanks to Android's MediaProjector API, you can copy the display image to a texture in your Unity project in 'near realtime' (several frames of latency) as demonstrated here. No PC, embedded browser, or dev mode required
+<video src="Assets/Resources/demo-video.mp4" controls="controls" style="max-width: 400px;">
+</video>
 
-![scrcpy_VmJvDrjcQL](https://github.com/user-attachments/assets/522bc5ea-8b91-4ee9-91cd-0385fffc93a3)
+## Overview
 
-## Special thanks
+White Christmas is an open source project that enables object detection and tracking inside Quest headsets, enhanced with Gemini API for real-time image understanding. This project builds upon the [QuestDisplayAccessDemo by trev3d](https://github.com/trev3d/QuestDisplayAccessDemo) to provide developers with advanced object recognition capabilities.
 
-[@t-34400's QuestMediaProjection repo](https://github.com/t-34400/QuestMediaProjection) demonstrated using Google's ML barcode reader.
+Since Meta's SDK does not currently allow direct access to the passthrough feed, we leverage Android's MediaProjector API as a workaround to capture the display image in near real-time. This solution runs natively within the headset using Google's MLKit on the Android runtime, with no PC, embedded browser, or dev mode required.
 
-[@Gustorvo](https://github.com/Gustorvo)'s pull request replaced a texture copy over the JNI with a pointer 
+## Features
+
+- Display capture from Quest headset using Android MediaProjector API
+- Real-time object detection and tracking using Google's MLKit
+- Integration with Gemini API for advanced image understanding
+- Shoe detection capabilities with a database of known footwear
+- Foot measurement validation
 
 ## Setup
 
@@ -30,6 +37,7 @@ Developers want camera access on the Meta Quest. Meta hasn't let us have it yet.
 <!--ADD THESE LINES TO YOUR MANIFEST <MANIFEST> SECTION!!!-->
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+<uses-permission android:name="android.permission.INTERNET" />
 <!--ADD THESE LINES TO YOUR MANIFEST <MANIFEST> SECTION!!!-->
 ```
 
@@ -40,57 +48,65 @@ Developers want camera access on the Meta Quest. Meta hasn't let us have it yet.
 <!--ADD THESE LINES TO YOUR MANIFEST <APPLICATION> SECTION!!!-->
 ```
 
-![image](https://github.com/user-attachments/assets/55c56c9a-8f6f-476d-b8b4-4446b51e6db1)
-
 - Update your `mainTemplate.gradle` file with these lines:
 
 ```
 /* ADD THESE LINES TO YOUR GRADLE DEPENDENCIES SECTION */
 implementation 'androidx.appcompat:appcompat:1.6.1'
 implementation 'com.google.mlkit:barcode-scanning:17.3.0'
+implementation 'com.google.mlkit:object-detection:17.0.0'
 implementation 'com.google.code.gson:gson:2.11.0'
+implementation 'com.google.ai.client.generativeai:generativeai:0.2.0'
 /* ADD THESE LINES TO YOUR GRADLE DEPENDENCIES SECTION */
 ```
 
-![image](https://github.com/user-attachments/assets/c40f34b3-de5c-4fa1-a472-842115bc7062)
+- Set up your Gemini API key in your Firebase environment
 
-- Refer to `Demo.scene` on setting up the necessary components. I'll update and document these in a future commit (sorry)
+## Object Detection & Gemini API Integration
 
-![image](https://github.com/user-attachments/assets/e7167678-b36e-44e6-86ae-774b7ab714c2)
+This project extends the original display access demo with:
 
+1. **Object Detection**: The system can identify and track objects in the Quest's view using Google's MLKit
+2. **Shoe Detection**: Specialized detection for footwear with matching against a database
+3. **Gemini AI Integration**: Uses Google's Gemini API to analyze and understand images in real-time
+4. **Firebase Integration**: Functions to process and store detection results
 
-## ⚠️ Issues (please read)!
+## ⚠️ Limitations and Known Issues
 
-### To fix 
+### Technical Limitations
 
-⚠️ MediaProjection stop callback doesn't seem to work correctly
+- This is a workaround, not true camera/passthrough access
+- Display capture has several frames of latency
+- Virtual elements will obscure physical objects in the image
+- Only works on-headset (not through QuestLink)
 
-### Gotchas
+### Hardware Requirements
 
-⚠️⚠️⚠️ Google's ML barcode scanner annoyingly reorders corner point order so that codes always face 'up' relative to the viewer. This makes it near impossible to properly track the orientation of flat-facing codes as the orientation will always face 'toward' you. You can get around this by using two codes and the vector between them as your orientation
+- QR code tracking will only work on Quest 3/3S (due to depth estimation features)
+- You may need Quest system software v68 or higher
 
-⚠️ While display capture and QR code reading will work on any headset, QR code *tracking* will only work on Quest 3 / Quest 3S due to other headsets lacking depth estimation features.
+### Performance Considerations
 
-⚠️ Display capture is expensive, as is QR code tracking
+- Display capture and object detection are computationally expensive
+- Multiple ML models running simultaneously may impact performance
 
-⚠️ You may need to be on Quest system software v68 or higher
+## Credits
 
-⚠️ This only works on-headset. This will not work through QuestLink
+This project builds upon:
 
-⚠️ You cannot video record the display 'normally' while this app's MediaProjector session is running. You can instead use [scrcpy](https://github.com/Genymobile/scrcpy) to record any prototypes or demos you make with this.
+- [QuestDisplayAccessDemo by trev3d](https://github.com/trev3d/QuestDisplayAccessDemo)
+- [@t-34400's QuestMediaProjection repo](https://github.com/t-34400/QuestMediaProjection)
+- [@Gustorvo](https://github.com/Gustorvo)'s texture pointer optimization
 
-⚠️ This still isn't proper camera access. Any virtual elements will obscure physical objects in the image. If you need to track something, you must not render anything on top of it!
+## Technical Reference
 
-### Other info
+- Captured view is ~82 degrees in horizontal and vertical FOV on Quest 3
+- Capture texture is 1024x1024
+- MediaProjection captures frames from the left eye buffer
 
-- The captured view is ~82 degrees in horizontal and vertical FOV on Quest 3
-- The capture texture is 1024x1024
-- MediaProjection currently captures frames from the left eye buffer
-- Quest system camera settings do not affect the capture resolution, framerate, or eye
+## Additional Resources
 
-## Reference
-
-- [https://developer.oculus.com/documentation/native/native-media-projection/](https://developer.oculus.com/documentation/native/native-media-projection/)
-- [https://developer.android.com/media/grow/media-projection](https://developer.android.com/media/grow/media-projection)
-- [https://github.com/android/media-samples/tree/main/ScreenCapture](https://github.com/android/media-samples/tree/main/ScreenCapture)
-- [https://developers.google.com/android/reference/com/google/mlkit/vision/barcode/common/Barcode](https://developers.google.com/android/reference/com/google/mlkit/vision/barcode/common/Barcode)
+- [Meta Documentation on Media Projection](https://developer.oculus.com/documentation/native/native-media-projection/)
+- [Android Media Projection API](https://developer.android.com/media/grow/media-projection)
+- [Google MLKit Documentation](https://developers.google.com/ml-kit)
+- [Gemini API Documentation](https://ai.google.dev/docs)

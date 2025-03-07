@@ -14,48 +14,70 @@ namespace Anaglyph.ShoeInteraction
         [SerializeField] private HandShoeInteractionManager interactionManager;
         [SerializeField] private ObjectTracker objectTracker;
         [SerializeField] private GameObject infoPanelPrefab;
-        [SerializeField] private float panelOffset = 0.3f; // Distance from shoe to display panel
-        [SerializeField] private float panelLerpSpeed = 5f; // Speed of panel movement smoothing
-        [SerializeField] private float panelRotationLerpSpeed = 8f; // Speed of panel rotation smoothing
-        [SerializeField] private float maxAnchorDistance = 3f; // Maximum distance for anchor usage
+        [SerializeField] private float panelOffset = 0.3f;
+        [SerializeField] private float panelLerpSpeed = 5f;
+        [SerializeField] private float panelRotationLerpSpeed = 8f;
+        [SerializeField] private float maxAnchorDistance = 3f;
 
         private Dictionary<int, GameObject> activePanels = new();
-        private Dictionary<int, ShoeInfoData> shoeInfoCache = new();
-        private Dictionary<int, OVRSpatialAnchor> activeAnchors = new();
+        private Dictionary<int, string> trackingIdToShoeId = new();
+        private bool isInitialized = false;
 
-        private class ShoeInfoData
-        {
-            public string Name;
-            public string Description;
-            public string Price;
-            public string Size;
-            public string DocumentId;
-            public OVRSpatialAnchor.SaveOptions SaveOptions;
-        }
-
-        private void Start()
+        private async void Start()
         {
             if (interactionManager == null)
-            {
                 interactionManager = FindFirstObjectByType<HandShoeInteractionManager>();
-            }
 
             if (objectTracker == null)
-            {
                 objectTracker = FindFirstObjectByType<ObjectTracker>();
-            }
 
+            // Wait for ShoeDataCache to be initialized
+            if (!ShoeDataCache.Instance.IsInitialized)
+            {
+                ShoeDataCache.Instance.OnCacheInitialized += HandleCacheInitialized;
+                await ShoeDataCache.Instance.Initialize();
+            }
+            else
+            {
+                HandleCacheInitialized();
+            }
+        }
+
+        private void HandleCacheInitialized()
+        {
+            // Subscribe to shoe data updates
+            ShoeDataCache.Instance.OnShoeDataUpdated += HandleShoeDataUpdated;
+
+            // Subscribe to interaction events
             interactionManager.OnShoePickedUp += HandleShoePickedUp;
             interactionManager.OnShoeDropped += HandleShoeDropped;
             interactionManager.OnShoePositionUpdated += UpdatePanelPosition;
             interactionManager.OnShoePlacedOnShelf += HandleShoePlacedOnShelf;
 
-            // Load any existing anchors when the scene starts
-            _ = LoadExistingAnchors();
+            isInitialized = true;
         }
 
-        private async void OnDestroy()
+        private void HandleShoeDataUpdated(string shoeId)
         {
+            // Update any active panels showing this shoe
+            foreach (var kvp in trackingIdToShoeId)
+            {
+                if (kvp.Value == shoeId && activePanels.TryGetValue(kvp.Key, out var panel))
+                {
+                    var infoPanel = panel.GetComponent<ShoeInfoPanel>();
+                    infoPanel.SetShoeInfo(shoeId);
+                }
+            }
+        }
+
+        private void OnDestroy()
+        {
+            if (ShoeDataCache.Instance != null)
+            {
+                ShoeDataCache.Instance.OnCacheInitialized -= HandleCacheInitialized;
+                ShoeDataCache.Instance.OnShoeDataUpdated -= HandleShoeDataUpdated;
+            }
+
             if (interactionManager != null)
             {
                 interactionManager.OnShoePickedUp -= HandleShoePickedUp;
@@ -64,167 +86,137 @@ namespace Anaglyph.ShoeInteraction
                 interactionManager.OnShoePlacedOnShelf -= HandleShoePlacedOnShelf;
             }
 
-            // Clean up active anchors
-            foreach (var anchor in activeAnchors.Values)
+            // Clean up active panels
+            foreach (var panel in activePanels.Values)
             {
-                if (anchor != null)
+                if (panel != null)
                 {
-                    await anchor.EraseAnchorAsync();
-                    Destroy(anchor.gameObject);
+                    Destroy(panel);
                 }
             }
-            activeAnchors.Clear();
-        }
-
-        private async Task LoadExistingAnchors()
-        {
-            await SpatialAnchorManager.Instance.LoadSavedAnchors();
+            activePanels.Clear();
+            trackingIdToShoeId.Clear();
         }
 
         private async void HandleShoePickedUp(int trackingId, Vector3 position)
         {
-            if (activePanels.ContainsKey(trackingId)) return;
+            if (!isInitialized || activePanels.ContainsKey(trackingId)) return;
 
-            // Get shoe info from cache or fetch from Firebase
-            var shoeInfo = await GetShoeInfo(trackingId);
-            if (shoeInfo == null) return;
+            string shoeId = await GetShoeId(trackingId, position);
+            if (string.IsNullOrEmpty(shoeId)) return;
+
+            // Verify the shoe exists in cache
+            var shoeData = ShoeDataCache.Instance.GetShoeData(shoeId);
+            if (shoeData == null)
+            {
+                Debug.LogWarning($"Shoe data not found in cache for ID: {shoeId}");
+                return;
+            }
 
             // Create and setup info panel
             var panel = Instantiate(infoPanelPrefab);
-            SetupInfoPanel(panel, shoeInfo);
+            var infoPanel = panel.GetComponent<ShoeInfoPanel>();
+            infoPanel.SetShoeInfo(shoeId);
+
             activePanels[trackingId] = panel;
+            trackingIdToShoeId[trackingId] = shoeId;
 
             // Position panel relative to shoe
             UpdatePanelPosition(trackingId, position);
         }
 
-        private async void HandleShoeDropped(int trackingId, Vector3 position)
+        private async Task<string> GetShoeId(int trackingId, Vector3 position)
+        {
+            // First check if we already know this shoe's ID
+            if (trackingIdToShoeId.TryGetValue(trackingId, out string cachedShoeId))
+            {
+                return cachedShoeId;
+            }
+
+            // Try to find an existing anchor nearby
+            var nearestAnchor = FindNearestAnchor(position);
+            if (nearestAnchor != null)
+            {
+                string shoeId = AnchorMappingManager.Instance.GetShoeDocumentId(nearestAnchor.Uuid.ToString());
+                if (!string.IsNullOrEmpty(shoeId))
+                {
+                    return shoeId;
+                }
+            }
+
+            // If no existing anchor found, detect the shoe
+            try
+            {
+                var screenTexture = DisplayCaptureManager.Instance.ScreenCaptureTexture;
+                var bbox = objectTracker.GetBoundingBoxForTrackedObject(trackingId);
+
+                var imageData = ImageUtils.CropAndEncodeImage(
+                    screenTexture,
+                    (int)bbox.left,
+                    (int)(DisplayCaptureManager.Instance.Size.y - bbox.bottom),
+                    (int)(bbox.right - bbox.left),
+                    (int)(bbox.bottom - bbox.top)
+                );
+
+                var (_, detectedShoeId) = await FirebaseService.Instance.DetectShoe(imageData);
+
+                if (detectedShoeId != "0" && detectedShoeId != "-1")
+                {
+                    // Create new anchor and map it
+                    var newAnchor = await SpatialAnchorManager.Instance.CreateAnchorAtPoint(position);
+                    if (newAnchor != null)
+                    {
+                        await AnchorMappingManager.Instance.AddAnchorMapping(
+                            newAnchor.Uuid.ToString(),
+                            detectedShoeId
+                        );
+                    }
+                    return detectedShoeId;
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"Failed to detect shoe: {ex.Message}");
+            }
+
+            return null;
+        }
+
+        private void HandleShoeDropped(int trackingId, Vector3 position)
         {
             if (activePanels.TryGetValue(trackingId, out var panel))
             {
-                Destroy(panel);
-                activePanels.Remove(trackingId);
-            }
+                var infoPanel = panel.GetComponent<ShoeInfoPanel>();
+                infoPanel.Hide(); // Animate out
 
-            // Note: We don't clean up the anchor here anymore
-            // It will be handled when the shoe is placed on the shelf
-            // or if it's picked up again
+                // Destroy after animation
+                StartCoroutine(DestroyPanelAfterDelay(panel, trackingId, 0.5f));
+            }
+        }
+
+        private System.Collections.IEnumerator DestroyPanelAfterDelay(GameObject panel, int trackingId, float delay)
+        {
+            yield return new WaitForSeconds(delay);
+
+            if (panel != null)
+            {
+                Destroy(panel);
+            }
+            activePanels.Remove(trackingId);
+            trackingIdToShoeId.Remove(trackingId);
         }
 
         private void UpdatePanelPosition(int trackingId, Vector3 shoePosition)
         {
             if (!activePanels.TryGetValue(trackingId, out var panel)) return;
 
-            // Calculate desired panel position
             var cameraTransform = Camera.main.transform;
             var directionToCamera = (cameraTransform.position - shoePosition).normalized;
             var targetPosition = shoePosition + directionToCamera * panelOffset;
-
-            // Calculate desired panel rotation (facing the user)
             var targetRotation = Quaternion.LookRotation(-directionToCamera);
 
-            // Smoothly move and rotate panel
             panel.transform.position = Vector3.Lerp(panel.transform.position, targetPosition, Time.deltaTime * panelLerpSpeed);
             panel.transform.rotation = Quaternion.Lerp(panel.transform.rotation, targetRotation, Time.deltaTime * panelRotationLerpSpeed);
-        }
-
-        private void SetupInfoPanel(GameObject panel, ShoeInfoData shoeInfo)
-        {
-            var infoPanel = panel.GetComponent<ShoeInfoPanel>();
-            if (infoPanel != null)
-            {
-                infoPanel.SetShoeInfo(shoeInfo.Name, shoeInfo.Description, shoeInfo.Price, shoeInfo.Size);
-            }
-        }
-
-        private async Task<ShoeInfoData> GetShoeInfo(int trackingId)
-        {
-            // Return cached info if available
-            if (shoeInfoCache.TryGetValue(trackingId, out var cachedInfo))
-            {
-                return cachedInfo;
-            }
-
-            try
-            {
-                // First try to find an existing anchor near the tracked object
-                var trackedObject = FindTrackedObject(trackingId);
-                if (trackedObject.trackingId == 0) return null;
-
-                var nearestAnchor = FindNearestAnchor(trackedObject.center);
-                string shoeDocId;
-
-                if (nearestAnchor != null)
-                {
-                    // Get shoe document ID from existing anchor mapping
-                    shoeDocId = AnchorMappingManager.Instance.GetShoeDocumentId(nearestAnchor.Uuid.ToString());
-                }
-                else
-                {
-                    // Create a new anchor and get shoe info from object detection
-                    var newAnchor = await SpatialAnchorManager.Instance.CreateAnchorAtPoint(trackedObject.center);
-                    if (newAnchor == null) return null;
-
-                    // Get the current screen texture and process image for shoe detection
-                    var screenTexture = DisplayCaptureManager.Instance.ScreenCaptureTexture;
-                    var bbox = objectTracker.GetBoundingBoxForTrackedObject(trackingId);
-
-                    var imageData = ImageUtils.CropAndEncodeImage(
-                        screenTexture,
-                        (int)bbox.left,
-                        (int)(DisplayCaptureManager.Instance.Size.y - bbox.bottom),
-                        (int)(bbox.right - bbox.left),
-                        (int)(bbox.bottom - bbox.top)
-                    );
-
-                    (string detectedName, string detectedShoeDocId) = await FirebaseService.Instance.DetectShoe(imageData);
-                    shoeDocId = detectedShoeDocId;
-
-                    if (shoeDocId != "0" && shoeDocId != "-1")
-                    {
-                        await AnchorMappingManager.Instance.AddAnchorMapping(
-                            newAnchor.Uuid.ToString(),
-                            shoeDocId
-                        );
-                    }
-
-                    activeAnchors[trackingId] = newAnchor;
-                }
-
-                if (string.IsNullOrEmpty(shoeDocId)) return null;
-
-                // Fetch shoe info from Firestore
-                var shoeData = await FirebaseService.Instance.Firestore
-                    .Collection("shoes")
-                    .Document(shoeDocId)
-                    .GetSnapshotAsync();
-
-                if (!shoeData.Exists) return null;
-
-                // Create and cache shoe info
-                var shoeInfo = new ShoeInfoData
-                {
-                    Name = shoeData.GetValue<string>("name"),
-                    Description = shoeData.GetValue<string>("description"),
-                    Price = shoeData.GetValue<string>("price"),
-                    Size = shoeData.GetValue<string>("size"),
-                    DocumentId = shoeDocId
-                };
-
-                shoeInfoCache[trackingId] = shoeInfo;
-                return shoeInfo;
-            }
-            catch (System.Exception ex)
-            {
-                Debug.LogError($"Failed to fetch shoe info: {ex.Message}");
-                return null;
-            }
-        }
-
-        private ObjectTracker.TrackedObject FindTrackedObject(int trackingId)
-        {
-            var trackedObjects = FindFirstObjectByType<ObjectTracker>().TrackedObjects;
-            return trackedObjects.FirstOrDefault(obj => obj.trackingId == trackingId);
         }
 
         private OVRSpatialAnchor FindNearestAnchor(Vector3 position)
@@ -237,27 +229,25 @@ namespace Anaglyph.ShoeInteraction
 
         private async void HandleShoePlacedOnShelf(int trackingId, Vector3 position)
         {
-            if (!shoeInfoCache.TryGetValue(trackingId, out var shoeInfo)) return;
-            if (!activeAnchors.TryGetValue(trackingId, out var anchor)) return;
+            if (!trackingIdToShoeId.TryGetValue(trackingId, out var shoeId)) return;
 
-            try
+            var nearestAnchor = FindNearestAnchor(position);
+            if (nearestAnchor == null)
             {
-                // Update the anchor mapping with the final shelf position
-                await AnchorMappingManager.Instance.AddAnchorMapping(
-                    anchor.Uuid.ToString(),
-                    shoeInfo.DocumentId
-                );
-
-                // Save the anchor with additional metadata if needed
-                var saveResult = await anchor.SaveAnchorAsync();
-                if (!saveResult.Success)
+                var newAnchor = await SpatialAnchorManager.Instance.CreateAnchorAtPoint(position);
+                if (newAnchor != null)
                 {
-                    Debug.LogError($"Failed to save shelf anchor. Status: {saveResult.Status}");
+                    await AnchorMappingManager.Instance.AddAnchorMapping(
+                        newAnchor.Uuid.ToString(),
+                        shoeId
+                    );
+
+                    var saveResult = await newAnchor.SaveAnchorAsync();
+                    if (!saveResult.Success)
+                    {
+                        Debug.LogError($"Failed to save shelf anchor. Status: {saveResult.Status}");
+                    }
                 }
-            }
-            catch (System.Exception ex)
-            {
-                Debug.LogError($"Failed to update shelf anchor mapping: {ex.Message}");
             }
         }
     }
