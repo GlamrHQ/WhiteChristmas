@@ -1,7 +1,6 @@
 # White Christmas - Local Object Detection in Quest with Gemini API for Image understanding
 
-<video src="Assets/Resources/demo-video.mp4" controls="controls" style="max-width: 400px;">
-</video>
+https://github.com/user-attachments/assets/7d485458-e76c-4ea2-a6ae-177849aaf4bd
 
 ## Overview
 
